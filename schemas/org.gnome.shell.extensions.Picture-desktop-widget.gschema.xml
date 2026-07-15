@@ -53,5 +53,17 @@
       <summary>Path to the currently displayed image</summary>
       <description>Stores the path of the image currently being displayed on the desktop.</description>
     </key>
+
+    <key name="widget-profiles" type="s">
+      <default>'[]'</default>
+      <summary>Serialized list of widget profiles</summary>
+      <description>Stores the configuration for each desktop widget instance.</description>
+    </key>
+
+    <key name="active-profile-id" type="s">
+      <default>''</default>
+      <summary>ID of the currently selected widget profile</summary>
+      <description>Used by the preferences dialog to identify which widget profile is being edited.</description>
+    </key>
   </schema>
 </schemalist>
