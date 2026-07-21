@@ -10,6 +10,13 @@ Profiles can be selected and managed from the preferences dialog before changing
 The extension can be downloaded from the GNOME Extensions website:
 [<img src="docs/gnome-extensions_logo.svg" height="100">](https://extensions.gnome.org/extension/8388/picture-desktop-widget/)
 
+## Developer resources
+
+For extension development and debugging guidance, see:
+- GNOME Shell 50 porting guide: https://gjs.guide/extensions/upgrading/gnome-shell-50.html
+- Extension development docs: https://gjs.guide/extensions/development/creating.html
+- Debugging guide: https://gjs.guide/extensions/development/debugging.html
+
 ## Find a bug or you have a suggestion?
 Don't hesitate to report any issue you found or any suggestion you have to make in order to improve the extension.
 
