@@ -1,6 +1,7 @@
 import St from 'gi://St';
 import GLib from 'gi://GLib';
 import Gio from 'gi://Gio';
+import Clutter from 'gi://Clutter';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import { Extension, gettext as _ } from 'resource:///org/gnome/shell/extensions/extension.js';
 
@@ -218,7 +219,7 @@ export default class Picture_desktop_widget_extension extends Extension {
             if (current) {
                 this._refreshProfile(current, false);
             }
-            this._scheduleProfileRefresh(profile);
+            this._scheduleProfileRefresh(current || profile);
             return GLib.SOURCE_REMOVE;
         });
         this._timeoutIds.set(id, timeoutId);
@@ -346,7 +347,11 @@ export default class Picture_desktop_widget_extension extends Extension {
         widget.visible = profile.visible !== false;
 
         // Remove previously added label
-        if (widget._label) {
+        if (widget._emptyStateBox) {
+            widget._emptyStateBox.destroy();
+            widget._emptyStateBox = null;
+            widget._label = null;
+        } else if (widget._label) {
             widget._label.destroy();
             widget._label = null;
         }
@@ -364,13 +369,32 @@ export default class Picture_desktop_widget_extension extends Extension {
                 (profile.imagePath
                     ? _('No images found in this folder')
                     : _('Add a path\n to folder with images'));
-            const label = new St.Label({ text: msg });
+            const emptyStateBox = new St.BoxLayout({
+                vertical: true,
+                x_expand: true,
+                y_expand: true,
+                x_align: Clutter.ActorAlign.FILL,
+                y_align: Clutter.ActorAlign.FILL,
+            });
+            const topSpacer = new St.Widget({ x_expand: true, y_expand: true });
+            const label = new St.Label({
+                text: msg,
+                x_align: Clutter.ActorAlign.CENTER,
+                y_align: Clutter.ActorAlign.CENTER,
+                x_expand: true,
+                y_expand: false,
+            });
             label.set_style(`
                 color: white;
-                font-size: ${Math.max(12, Math.min(width, height) / 10)}px;
+                font-size: ${Math.max(10, Math.min(width, height) / 18)}px;
                 text-align: center;
             `);
-            widget.add_child(label);
+            const bottomSpacer = new St.Widget({ x_expand: true, y_expand: true });
+            emptyStateBox.add_child(topSpacer);
+            emptyStateBox.add_child(label);
+            emptyStateBox.add_child(bottomSpacer);
+            widget.add_child(emptyStateBox);
+            widget._emptyStateBox = emptyStateBox;
             widget._label = label;
         } else {
             const imageUri = Gio.File.new_for_path(
@@ -383,13 +407,6 @@ export default class Picture_desktop_widget_extension extends Extension {
                 background-position: center;
                 border-radius: ${radiusPx}px;
             `);
-
-            // Tooltip showing the image file path and profile name
-            widget.set_tooltip_text(
-                profile.currentImagePath
-                    ? `${profile.name || ''}: ${profile.currentImagePath}`
-                    : profile.name
-            );
         }
     }
 
@@ -440,9 +457,18 @@ export default class Picture_desktop_widget_extension extends Extension {
                 const visibilityChanged = existing.visible !== profile.visible;
                 const nameChanged = existing.name !== profile.name;
 
+                const runtimeState = {
+                    currentImagePath: existing.currentImagePath,
+                    cachedFiles: existing.cachedFiles,
+                    cachedFolderPath: existing.cachedFolderPath,
+                    timeLastUpdate: existing.timeLastUpdate,
+                    _statusMessage: existing._statusMessage,
+                };
+
                 // Merge incoming values into the existing (preserving in-memory ref)
                 // so that mutations from _refreshProfile/_selectRandomImage are kept
                 Object.assign(existing, profile);
+                Object.assign(existing, runtimeState);
 
                 if (!imagePathChanged) {
                     existing.requiresRescan = false;

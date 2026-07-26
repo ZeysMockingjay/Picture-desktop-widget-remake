@@ -3,6 +3,8 @@
 import Adw from 'gi://Adw';
 import Gtk from 'gi://Gtk';
 import Gio from 'gi://Gio';
+import GLib from 'gi://GLib';
+import Gdk from 'gi://Gdk';
 
 import { ExtensionPreferences, gettext as _ } from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
 
@@ -13,162 +15,218 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
         this._activeProfileId = this.settings.get_string('active-profile-id') ||
                                 this._profiles[0]?.id || '';
 
-        // === PAGE: General ==================================================
-        const generalPage = new Adw.PreferencesPage();
-        generalPage.set_title(_('General'));
-        generalPage.set_name(_('General'));
+        if (!this._profiles.some(p => p.id === this._activeProfileId))
+            this._activeProfileId = this._profiles[0]?.id || '';
 
-        // -- Group: Widget profiles ------------------------------------------
-        const profileGroup = new Adw.PreferencesGroup();
-        profileGroup.set_title(_('Widget Profiles'));
-        profileGroup.set_description(
-            _('Each profile is an independent desktop widget with its own folder, ' +
-              'size, position, and refresh interval. Use the selector below to ' +
-              'switch between profiles and adjust their settings.')
+        this._frameCards = new Map();
+        this._frameStack = null;
+        this._frameDashboardFlow = null;
+        this._frameTitleLabel = null;
+        this._frameSubtitleLabel = null;
+        this._settingsHeaderTitle = null;
+        this._settingsHeaderSubtitle = null;
+        this._settingsPageButton = null;
+        this._deleteFrameRow = null;
+        this._deleteFrameButton = null;
+        this._profileSaveTimeoutId = 0;
+        this._frameTileStyleProvider = null;
+
+        const page = new Adw.PreferencesPage();
+        page.set_title(_('Image Frames'));
+        page.set_name(_('Image Frames'));
+
+        const toolbarView = new Adw.ToolbarView();
+        const titlebar = new Gtk.HeaderBar({
+            show_title_buttons: true,
+        });
+        const aboutButton = Gtk.Button.new_from_icon_name('help-about-symbolic');
+        aboutButton.add_css_class('flat');
+        aboutButton.set_tooltip_text(_('About'));
+        aboutButton.connect('clicked', () => this._showAboutDialog(window));
+        titlebar.pack_end(aboutButton);
+        toolbarView.add_top_bar(titlebar);
+        toolbarView.set_content(page);
+        window.set_content(toolbarView);
+
+        const shellGroup = new Adw.PreferencesGroup();
+        shellGroup.set_title(_('Image Frames'));
+        shellGroup.set_description(
+            _('Tap the add card to create a new frame, then open it to edit its settings.')
         );
 
-        // Profile selector with icon
-        const profileSelectorRow = new Adw.ActionRow({
-            title: _('Active Profile'),
-            subtitle: this._getActiveProfile()?.name || _('Default widget'),
+        const shellBox = new Gtk.Box({
+            orientation: Gtk.Orientation.VERTICAL,
+            spacing: 18,
+        });
+        shellGroup.add(shellBox);
+        page.add(shellGroup);
+
+        const headerRow = new Gtk.Box({
+            orientation: Gtk.Orientation.HORIZONTAL,
+            spacing: 12,
+            hexpand: true,
+        });
+        const headerText = new Gtk.Box({
+            orientation: Gtk.Orientation.VERTICAL,
+            spacing: 4,
+            hexpand: true,
+        });
+        this._frameTitleLabel = new Gtk.Label({
+            label: _('Image Frames'),
+            xalign: 0,
+            wrap: true,
+        });
+        this._frameTitleLabel.add_css_class('title-1');
+        this._frameSubtitleLabel = new Gtk.Label({
+            label: _('Tap the add card to create Frame 1.'),
+            xalign: 0,
+            wrap: true,
+        });
+        this._frameSubtitleLabel.add_css_class('dim-label');
+        headerText.append(this._frameTitleLabel);
+        headerText.append(this._frameSubtitleLabel);
+
+        headerRow.append(headerText);
+        shellBox.append(headerRow);
+
+        this._frameStack = new Gtk.Stack({
+            transition_type: Gtk.StackTransitionType.SLIDE_LEFT_RIGHT,
+            transition_duration: 220,
+            hexpand: true,
+            vexpand: true,
+        });
+        shellBox.append(this._frameStack);
+
+        const dashboardBox = new Gtk.Box({
+            orientation: Gtk.Orientation.VERTICAL,
+            spacing: 12,
+            hexpand: true,
+            vexpand: true,
+        });
+        const dashboardScroll = new Gtk.ScrolledWindow({
+            hexpand: true,
+            vexpand: true,
+            hscrollbar_policy: Gtk.PolicyType.NEVER,
+        });
+        this._frameDashboardFlow = new Gtk.FlowBox({
+            selection_mode: Gtk.SelectionMode.NONE,
+            valign: Gtk.Align.START,
+            row_spacing: 14,
+            column_spacing: 14,
+            homogeneous: true,
+            max_children_per_line: 4,
+        });
+        dashboardScroll.set_child(this._frameDashboardFlow);
+        dashboardBox.append(dashboardScroll);
+        this._frameStack.add_named(dashboardBox, 'dashboard');
+
+        const settingsBox = new Gtk.Box({
+            orientation: Gtk.Orientation.VERTICAL,
+            spacing: 16,
+            hexpand: true,
+            vexpand: true,
         });
 
-        const profileModel = new Gtk.StringList({
-            strings: this._profiles.map(p => p.name || p.id),
+        const settingsHeader = new Gtk.Box({
+            orientation: Gtk.Orientation.HORIZONTAL,
+            spacing: 12,
+            hexpand: true,
         });
-        const profileSelector = new Gtk.DropDown({
-            model: profileModel,
-            valign: Gtk.Align.CENTER,
-        });
-        const activeIndex = this._profiles.findIndex(
-            p => p.id === this._activeProfileId
-        );
-        profileSelector.set_selected(activeIndex >= 0 ? activeIndex : 0);
-        profileSelector.connect('notify::selected', () => {
-            const idx = profileSelector.get_selected();
-            const profile = this._profiles[idx];
-            if (!profile) return;
-            this._activeProfileId = profile.id;
-            this.settings.set_string('active-profile-id', profile.id);
-            profileSelectorRow.set_subtitle(profile.name || profile.id);
-            profileNameRow.set_text(profile.name || _('Default widget'));
-            if (this._visibleRow)
-                this._visibleRow.set_active(profile.visible !== false);
-            this._updateSettingRows();
-        });
-        profileSelectorRow.add_suffix(profileSelector);
-        profileSelectorRow.activatable_widget = profileSelector;
-        profileGroup.add(profileSelectorRow);
+        const settingsBack = Gtk.Button.new_from_icon_name('go-previous-symbolic');
+        settingsBack.add_css_class('flat');
+        settingsBack.set_tooltip_text(_('Back to image frames'));
+        settingsBack.connect('clicked', () => this._showDashboard());
+        this._settingsPageButton = settingsBack;
 
-        // Profile name
-        const profileNameRow = new Adw.EntryRow({ title: _('Profile Name') });
-        profileNameRow.set_text(
-            this._getActiveProfile()?.name || _('Default widget')
+        const settingsHeaderText = new Gtk.Box({
+            orientation: Gtk.Orientation.VERTICAL,
+            spacing: 4,
+            hexpand: true,
+        });
+        this._settingsHeaderTitle = new Gtk.Label({
+            label: _('Image Frame Settings'),
+            xalign: 0,
+            wrap: true,
+        });
+        this._settingsHeaderTitle.add_css_class('title-1');
+        this._settingsHeaderSubtitle = new Gtk.Label({
+            label: _('Edit the selected frame below.'),
+            xalign: 0,
+            wrap: true,
+        });
+        this._settingsHeaderSubtitle.add_css_class('dim-label');
+        settingsHeaderText.append(this._settingsHeaderTitle);
+        settingsHeaderText.append(this._settingsHeaderSubtitle);
+        settingsHeader.append(settingsBack);
+        settingsHeader.append(settingsHeaderText);
+        settingsBox.append(settingsHeader);
+
+        const settingsScroll = new Gtk.ScrolledWindow({
+            hexpand: true,
+            vexpand: true,
+            hscrollbar_policy: Gtk.PolicyType.NEVER,
+        });
+        const settingsContent = new Gtk.Box({
+            orientation: Gtk.Orientation.VERTICAL,
+            spacing: 18,
+            hexpand: true,
+            vexpand: true,
+        });
+        settingsScroll.set_child(settingsContent);
+
+        const frameGroup = new Adw.PreferencesGroup();
+        frameGroup.set_title(_('Image Frame Details'));
+        frameGroup.set_description(
+            _('Name the frame and decide whether it is visible on the desktop.')
         );
-        profileNameRow.connect('notify::text', () => {
+
+        this._frameNameRow = new Adw.EntryRow({ title: _('Image Frame Name') });
+        this._frameNameRow.set_text(this._getActiveProfile()?.name || _('Frame 1'));
+        this._frameNameRow.connect('notify::text', () => {
             const profile = this._getActiveProfile();
-            if (profile) {
-                profile.name = profileNameRow.get_text();
-                this._saveProfiles();
-                this._rebuildProfileSelector(profileSelector);
-                profileSelectorRow.set_subtitle(profile.name || profile.id);
-            }
+            if (!profile) return;
+            profile.name = this._frameNameRow.get_text();
+            this._queueSaveProfiles();
+            this._updateFrameTile(profile);
+            this._syncActiveFrameHeaders(profile);
         });
-        profileGroup.add(profileNameRow);
+        frameGroup.add(this._frameNameRow);
 
-        // Visibility
         this._visibleRow = new Adw.SwitchRow({
             title: _('Visible on Desktop'),
-            subtitle: _('Show or hide this widget without removing its settings'),
+            subtitle: _('Show or hide this image frame without deleting it'),
         });
         this._visibleRow.set_active(this._getActiveProfile()?.visible !== false);
         this._visibleRow.connect('notify::active', () => {
             const profile = this._getActiveProfile();
             if (!profile) return;
             profile.visible = this._visibleRow.get_active();
-            this._saveProfiles();
+            this._queueSaveProfiles();
+            this._updateFrameTile(profile);
         });
-        profileGroup.add(this._visibleRow);
+        frameGroup.add(this._visibleRow);
 
-        // -- Profile management actions ----------------------------------------
-        const actionsGroup = new Adw.PreferencesGroup();
-        actionsGroup.set_title(_('Manage Profiles'));
-        actionsGroup.set_description(
-            _('Add a new blank widget, duplicate the current one with all its ' +
-              'settings, or remove the active profile. You must keep at least ' +
-              'one profile.')
-        );
-
-        const actionsRow = new Adw.ActionRow({
-            title: _('Profile actions'),
+        this._deleteFrameRow = new Adw.ActionRow({
+            title: _('Delete Image Frame'),
+            subtitle: _('Remove this frame. At least one frame must remain.'),
         });
-
-        const addBtn = Gtk.Button.new_from_icon_name('list-add-symbolic');
-        addBtn.set_tooltip_text(_('Add new widget profile'));
-        addBtn.set_valign(Gtk.Align.CENTER);
-        addBtn.connect('clicked', () => {
-            const profile = this._createProfile();
-            this._profiles.push(profile);
-            this._activeProfileId = profile.id;
-            this.settings.set_string('active-profile-id', profile.id);
-            this._saveProfiles();
-            this._rebuildProfileSelector(profileSelector);
-            this._updateSettingRows();
-            profileNameRow.set_text(profile.name || _('Default widget'));
-            profileSelectorRow.set_subtitle(profile.name || profile.id);
-        });
-
-        const dupBtn = Gtk.Button.new_from_icon_name('edit-copy-symbolic');
-        dupBtn.set_tooltip_text(_('Duplicate the active profile'));
-        dupBtn.set_valign(Gtk.Align.CENTER);
-        dupBtn.connect('clicked', () => {
-            const src = this._getActiveProfile();
-            if (!src) return;
-            const dup = this._createProfile();
-            Object.assign(dup, {
-                name: `${src.name || _('Widget')} copy`,
-                imagePath: src.imagePath || '',
-                widgetSize: src.widgetSize || 200,
-                widgetPositionX: (src.widgetPositionX || 100) + 20,
-                widgetPositionY: (src.widgetPositionY || 100) + 20,
-                widgetAspectRatio: src.widgetAspectRatio || 1.0,
-                widgetTimeout: src.widgetTimeout || 60,
-                widgetCornerRadius: src.widgetCornerRadius || 20,
-                visible: src.visible !== false,
-            });
-            this._profiles.push(dup);
-            this._activeProfileId = dup.id;
-            this.settings.set_string('active-profile-id', dup.id);
-            this._saveProfiles();
-            this._rebuildProfileSelector(profileSelector);
-            this._updateSettingRows();
-            profileNameRow.set_text(dup.name || _('Default widget'));
-            profileSelectorRow.set_subtitle(dup.name || dup.id);
-        });
-
-        const removeBtn = Gtk.Button.new_from_icon_name('user-trash-symbolic');
-        removeBtn.set_tooltip_text(_('Remove the active profile'));
-        removeBtn.set_valign(Gtk.Align.CENTER);
-        removeBtn.connect('clicked', () => {
-            const idx = this._profiles.findIndex(
-                p => p.id === this._activeProfileId
-            );
+        this._deleteFrameButton = Gtk.Button.new_from_icon_name('user-trash-symbolic');
+        this._deleteFrameButton.add_css_class('destructive-action');
+        this._deleteFrameButton.set_valign(Gtk.Align.CENTER);
+        this._deleteFrameButton.connect('clicked', () => {
+            const idx = this._profiles.findIndex(p => p.id === this._activeProfileId);
             if (idx < 0 || this._profiles.length <= 1) return;
 
-            // GNOME-native confirmation dialog (Adw.MessageDialog)
             const dialog = new Adw.MessageDialog({
                 transient_for: window,
-                heading: _('Remove profile?'),
+                heading: _('Delete image frame?'),
                 body: _(
-                    'The widget “%s” and all its settings will be permanently ' +
-                    'removed.'
-                ).format(
-                    this._profiles[idx].name || this._profiles[idx].id
-                ),
+                    'The frame “%s” and all its settings will be removed.'
+                ).format(this._profiles[idx].name || this._profiles[idx].id),
                 close_response: 'cancel',
             });
             dialog.add_response('cancel', _('_Cancel'));
-            dialog.add_response('remove', _('_Remove'));
+            dialog.add_response('remove', _('_Delete'));
             dialog.set_response_appearance('remove', Adw.ResponseAppearance.DESTRUCTIVE);
             dialog.set_default_response('cancel');
 
@@ -178,168 +236,99 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
                     return;
                 }
                 this._profiles.splice(idx, 1);
-                this._activeProfileId = this._profiles[
-                    Math.max(0, idx - 1)
-                ].id;
-                this.settings.set_string(
-                    'active-profile-id', this._activeProfileId
-                );
+                this._activeProfileId = this._profiles[Math.max(0, idx - 1)].id;
+                this.settings.set_string('active-profile-id', this._activeProfileId);
                 this._saveProfiles();
-                this._rebuildProfileSelector(profileSelector);
+                this._refreshFrameDashboard();
                 this._updateSettingRows();
-                profileNameRow.set_text(
-                    this._getActiveProfile()?.name || _('Default widget')
-                );
-                profileSelectorRow.set_subtitle(
-                    this._getActiveProfile()?.name || ''
-                );
+                this._showSettingsPage();
                 dlg.destroy();
             });
             dialog.present();
         });
+        this._deleteFrameRow.add_suffix(this._deleteFrameButton);
+        this._deleteFrameRow.activatable_widget = this._deleteFrameButton;
 
-        actionsRow.add_suffix(addBtn);
-        actionsRow.add_suffix(dupBtn);
-        actionsRow.add_suffix(removeBtn);
-        actionsGroup.add(actionsRow);
-        generalPage.add(profileGroup);
-        generalPage.add(actionsGroup);
-        window.add(generalPage);
-
-        // === PAGE: Settings ==================================================
-        const settingsPage = new Adw.PreferencesPage();
-        settingsPage.set_title(_('Widget'));
-        settingsPage.set_name(_('Widget'));
-
-        const settingsGroup = new Adw.PreferencesGroup();
-        settingsGroup.set_title(_('Selected Profile Settings'));
-        settingsGroup.set_description(
-            _('Changes apply immediately. The widget on your desktop will ' +
-              'update without needing to close preferences.')
+        const imageGroup = new Adw.PreferencesGroup();
+        imageGroup.set_title(_('Image Source'));
+        imageGroup.set_description(
+            _('Pick the folder, size, position, rounding, and refresh timing for this frame.')
         );
 
-        // Image source
         this._imagePathRow = this._createFolderChooserRow(
-            _('Image Folder'), settingsPage,
+            _('Image Folder'), settingsScroll,
             () => this._getActiveProfile()?.imagePath || '',
             value => this._setActiveProfileValue('imagePath', value)
         );
-        settingsGroup.add(this._imagePathRow);
+        imageGroup.add(this._imagePathRow);
 
-        // Size
         this._sizeRow = this._createSpinRow(
             _('Widget Size (px)'), 50, 2000, 1, 10,
             () => this._getActiveProfile()?.widgetSize || 200,
             value => this._setActiveProfileValue('widgetSize', value)
         );
-        this._sizeRow.set_subtitle(_('Controls the overall footprint of the widget'));
-        settingsGroup.add(this._sizeRow);
+        this._sizeRow.set_subtitle(_('Controls the overall footprint of the frame'));
+        imageGroup.add(this._sizeRow);
 
-        // Position X
         this._xPositionRow = this._createSpinRow(
             _('X Position (px)'), 0, 100000, 5, 50,
             () => this._getActiveProfile()?.widgetPositionX || 0,
             value => this._setActiveProfileValue('widgetPositionX', value)
         );
-        settingsGroup.add(this._xPositionRow);
+        imageGroup.add(this._xPositionRow);
 
-        // Position Y
         this._yPositionRow = this._createSpinRow(
             _('Y Position (px)'), 0, 100000, 5, 50,
             () => this._getActiveProfile()?.widgetPositionY || 0,
             value => this._setActiveProfileValue('widgetPositionY', value)
         );
-        settingsGroup.add(this._yPositionRow);
+        imageGroup.add(this._yPositionRow);
 
-        // Aspect ratio
         this._aspectRatioRow = this._createSliderRow(
             _('Aspect Ratio'), 0.25, 4, 0.01, 0.1,
             () => this._getActiveProfile()?.widgetAspectRatio || 1.0,
             value => this._setActiveProfileValue('widgetAspectRatio', value),
             'double'
         );
-        this._aspectRatioRow.set_subtitle(
-            _('Width relative to height (1.0 = square)')
-        );
-        settingsGroup.add(this._aspectRatioRow);
+        this._aspectRatioRow.set_subtitle(_('Width relative to height (1.0 = square)'));
+        imageGroup.add(this._aspectRatioRow);
 
-        // Corner radius
         this._cornerRadiusRow = this._createSliderRow(
             _('Corner Radius (%)'), 0, 100, 1, 10,
             () => this._getActiveProfile()?.widgetCornerRadius || 20,
             value => this._setActiveProfileValue('widgetCornerRadius', value)
         );
-        this._cornerRadiusRow.set_subtitle(
-            _('Percentage of the shortest side')
-        );
-        settingsGroup.add(this._cornerRadiusRow);
+        this._cornerRadiusRow.set_subtitle(_('Percentage of the shortest side'));
+        imageGroup.add(this._cornerRadiusRow);
 
-        // Refresh interval
         this._timeoutRow = this._createSpinRow(
             _('Refresh Interval (s)'), 5, 100000, 5, 60,
             () => this._getActiveProfile()?.widgetTimeout || 60,
             value => this._setActiveProfileValue('widgetTimeout', value)
         );
-        this._timeoutRow.set_subtitle(
-            _('How often a new random image is selected')
-        );
-        settingsGroup.add(this._timeoutRow);
+        this._timeoutRow.set_subtitle(_('How often a new random image is selected'));
+        imageGroup.add(this._timeoutRow);
 
-        // Current image info (read-only)
-        const currentInfoRow = new Adw.ActionRow({
+        this._currentInfoRow = new Adw.ActionRow({
             title: _('Current Image'),
-            subtitle: this._getActiveProfile()?.currentImagePath ||
-                       _('(none selected yet)'),
+            subtitle: this._getActiveProfile()?.currentImagePath || _('(none selected yet)'),
             activatable: false,
         });
-        settingsGroup.add(currentInfoRow);
-        this._currentInfoRow = currentInfoRow;
+        imageGroup.add(this._currentInfoRow);
 
-        settingsPage.add(settingsGroup);
-        window.add(settingsPage);
+        settingsContent.append(frameGroup);
+        settingsContent.append(this._deleteFrameRow);
+        settingsContent.append(imageGroup);
+        settingsBox.append(settingsScroll);
+        this._frameStack.add_named(settingsBox, 'settings');
 
-        // === PAGE: About ====================================================
-        const aboutPage = new Adw.PreferencesPage();
-        aboutPage.set_title(_('About'));
-        aboutPage.set_name(_('About'));
+        this._refreshFrameDashboard();
+        this._updateSettingRows();
+        this._showDashboard();
+        this._installFrameTileStyles();
 
-        const aboutGroup = new Adw.PreferencesGroup();
-        aboutGroup.set_title(_('Picture Desktop Widget'));
-        aboutGroup.set_description(
-            _('Display multiple independent picture widgets on your desktop ' +
-              'background. Each widget cycles through images from its own folder.')
-        );
-
-        const versionRow = new Adw.ActionRow({
-            title: _('Version'),
-            subtitle: '9',
-            activatable: false,
-        });
-        aboutGroup.add(versionRow);
-
-        const supportedRow = new Adw.ActionRow({
-            title: _('Supported Images'),
-            subtitle: _('JPEG, PNG, GIF, BMP, WebP'),
-            activatable: false,
-        });
-        aboutGroup.add(supportedRow);
-
-        const tipRow = new Adw.ActionRow({
-            title: _('Tip'),
-            subtitle: _(
-                'Use the Duplicate button to quickly create a new widget ' +
-                'with the same settings as an existing one, then just change ' +
-                'the folder.'
-            ),
-            activatable: false,
-        });
-        aboutGroup.add(tipRow);
-
-        aboutPage.add(aboutGroup);
-        window.add(aboutPage);
-
-        // Close handler
         window.connect('close-request', () => {
+            this._flushQueuedProfileSave();
             this.settings = null;
         });
 
@@ -357,7 +346,7 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
             ...profile,
             id: profile.id || fallback.id ||
                 `profile-${Math.random().toString(36).slice(2, 10)}`,
-            name: profile.name || fallback.name || _('New profile'),
+            name: profile.name || fallback.name || _('New image frame'),
             imagePath: profile.imagePath ?? fallback.imagePath ?? '',
             widgetSize: Number.isFinite(Number(profile.widgetSize))
                 ? Number(profile.widgetSize)
@@ -399,7 +388,30 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
 
     _normalizeProfiles(profiles) {
         if (!Array.isArray(profiles)) return [];
-        return profiles.map(p => this._normalizeProfile(p));
+        return profiles
+            .map(p => this._normalizeProfile(p))
+            .filter(profile => !this._isLegacyPlaceholderProfile(profile));
+    }
+
+    _isLegacyPlaceholderProfile(profile) {
+        if (!profile) return false;
+        const legacyNames = new Set([
+            _('Default widget'),
+            _('New profile'),
+            _('New image frame'),
+        ]);
+        const hasMeaningfulData =
+            profile.imagePath ||
+            profile.currentImagePath ||
+            (Array.isArray(profile.cachedFiles) && profile.cachedFiles.length > 0) ||
+            profile.widgetSize !== 200 ||
+            profile.widgetPositionX !== 100 ||
+            profile.widgetPositionY !== 100 ||
+            profile.widgetAspectRatio !== 1.0 ||
+            profile.widgetTimeout !== 60 ||
+            profile.widgetCornerRadius !== 20 ||
+            profile.visible === false;
+        return legacyNames.has(profile.name) && !hasMeaningfulData;
     }
 
     _loadProfiles() {
@@ -408,7 +420,7 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
             const parsed = JSON.parse(raw);
             if (Array.isArray(parsed)) return parsed;
         } catch (error) {
-            console.warn(`Unable to parse profile settings: ${error}`);
+            console.warn(`Unable to parse image frame settings: ${error}`);
         }
         return [];
     }
@@ -421,13 +433,14 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
     }
 
     _createProfile() {
+        const offset = this._profiles.length * 40;
         return this._normalizeProfile({
             id: `profile-${Math.random().toString(36).slice(2, 10)}`,
-            name: _('New profile'),
+            name: this._getNextFrameName(),
             imagePath: '',
             widgetSize: 200,
-            widgetPositionX: 100,
-            widgetPositionY: 100,
+            widgetPositionX: 100 + offset,
+            widgetPositionY: 100 + offset,
             widgetAspectRatio: 1.0,
             widgetTimeout: 60,
             widgetCornerRadius: 20,
@@ -445,11 +458,27 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
                this._profiles[0];
     }
 
+    _setActiveFrame(frameId) {
+        const profile = this._profiles.find(p => p.id === frameId);
+        if (!profile) return;
+        this._activeProfileId = profile.id;
+        if (this.settings)
+            this.settings.set_string('active-profile-id', profile.id);
+        this._syncFrameTileSelection();
+        this._updateSettingRows();
+    }
+
     _setActiveProfileValue(key, value) {
         const profile = this._getActiveProfile();
         if (!profile) return;
         profile[key] = value;
-        this._saveProfiles();
+        this._queueSaveProfiles();
+        if (key === 'name') {
+            this._updateFrameTile(profile);
+            this._syncActiveFrameHeaders(profile);
+        } else if (key === 'visible') {
+            this._updateFrameTile(profile);
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -458,7 +487,17 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
 
     _updateSettingRows() {
         const profile = this._getActiveProfile();
-        if (!profile) return;
+        if (!profile) {
+            if (this._frameTitleLabel)
+                this._frameTitleLabel.set_label(_('Image Frames'));
+            if (this._frameSubtitleLabel)
+                this._frameSubtitleLabel.set_label(_('Tap the add card to create Frame 1.'));
+            return;
+        }
+
+        this._syncActiveFrameHeaders(profile);
+        if (this._frameNameRow && this._frameNameRow.get_text() !== (profile.name || _('Frame 1')))
+            this._frameNameRow.set_text(profile.name || _('Frame 1'));
 
         if (this._sizeRow)
             this._sizeRow.set_value(profile.widgetSize || 200);
@@ -481,16 +520,242 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
                 profile.currentImagePath || _('(none selected yet)')
             );
         }
+        if (this._deleteFrameButton)
+            this._deleteFrameButton.set_sensitive(this._profiles.length > 1);
     }
 
-    _rebuildProfileSelector(selector) {
-        const names = this._profiles.map(p => p.name || p.id);
-        const newModel = new Gtk.StringList({ strings: names });
-        selector.set_model(newModel);
-        const activeIndex = this._profiles.findIndex(
-            p => p.id === this._activeProfileId
-        );
-        selector.set_selected(activeIndex >= 0 ? activeIndex : 0);
+    _showDashboard() {
+        if (this._frameStack)
+            this._frameStack.set_visible_child_name('dashboard');
+    }
+
+    _showSettingsPage() {
+        if (this._frameStack)
+            this._frameStack.set_visible_child_name('settings');
+    }
+
+    _showAboutDialog(window) {
+        const dialog = new Adw.MessageDialog({
+            transient_for: window,
+            heading: _('Picture Desktop Widget Remake'),
+            body: _(
+                'Version 13\nSupports JPEG, PNG, GIF, BMP, and WebP images.\n\nMaintained by:\nMaximilian Rosenbaum\nElias-Leander Ahlers\n\nCredits:\nOriginal creator: GaszokS\nBased on Picture desktop widget.'
+            ),
+            close_response: 'close',
+        });
+        dialog.add_response('close', _('_Close'));
+        dialog.set_default_response('close');
+        dialog.connect('response', dlg => dlg.destroy());
+        dialog.present();
+    }
+
+    _syncActiveFrameHeaders(profile) {
+        if (this._frameSubtitleLabel)
+            this._frameSubtitleLabel.set_label(_('Editing the selected frame.'));
+        if (this._settingsHeaderTitle)
+            this._settingsHeaderTitle.set_label(profile?.name || _('Image Frames'));
+        if (this._settingsHeaderSubtitle)
+            this._settingsHeaderSubtitle.set_label(
+                _('Adjust the folder, size, position, rounding, and refresh interval.')
+            );
+    }
+
+    _syncFrameTileSelection() {
+        for (const [profileId, tile] of this._frameCards) {
+            if (profileId === this._activeProfileId)
+                tile.add_css_class('selected');
+            else
+                tile.remove_css_class('selected');
+        }
+    }
+
+    _updateFrameTile(profile) {
+        const tile = this._frameCards.get(profile.id);
+        if (!tile)
+            return;
+        if (tile._titleLabel)
+            tile._titleLabel.set_label(profile.name || _('Image frame'));
+        if (tile._statusLabel)
+            tile._statusLabel.set_label(profile.visible === false ? _('Hidden') : _('Visible'));
+        if (tile._subtitleLabel)
+            tile._subtitleLabel.set_label(profile.id === this._activeProfileId ? _('Open its settings') : _('Tap to edit'));
+    }
+
+    _getNextFrameName() {
+        const usedNumbers = new Set();
+        for (const profile of this._profiles) {
+            const match = /^Frame\s+(\d+)$/u.exec(profile.name || '');
+            if (match)
+                usedNumbers.add(Number(match[1]));
+        }
+        let frameNumber = 1;
+        while (usedNumbers.has(frameNumber))
+            frameNumber++;
+        return `Frame ${frameNumber}`;
+    }
+
+    _queueSaveProfiles() {
+        if (!this.settings)
+            return;
+        if (this._profileSaveTimeoutId) {
+            GLib.Source.remove(this._profileSaveTimeoutId);
+            this._profileSaveTimeoutId = 0;
+        }
+        this._profileSaveTimeoutId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 120, () => {
+            this._profileSaveTimeoutId = 0;
+            this._saveProfiles();
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
+    _flushQueuedProfileSave() {
+        if (this._profileSaveTimeoutId) {
+            GLib.Source.remove(this._profileSaveTimeoutId);
+            this._profileSaveTimeoutId = 0;
+            this._saveProfiles();
+        }
+    }
+
+    _refreshFrameDashboard() {
+        if (!this._frameDashboardFlow)
+            return;
+
+        let child = this._frameDashboardFlow.get_first_child();
+        while (child) {
+            const next = child.get_next_sibling();
+            this._frameDashboardFlow.remove(child);
+            child = next;
+        }
+
+        this._frameCards = new Map();
+
+        const addTile = this._buildFrameTile({ isAdd: true });
+        this._frameDashboardFlow.insert(addTile, -1);
+
+        for (const profile of this._profiles) {
+            const tile = this._buildFrameTile({ profile, isActive: profile.id === this._activeProfileId });
+            this._frameCards.set(profile.id, tile);
+            this._frameDashboardFlow.insert(tile, -1);
+        }
+
+        if (this._frameTitleLabel)
+            this._frameTitleLabel.set_label(_('Image Frames'));
+        if (this._frameSubtitleLabel) {
+            const count = this._profiles.length;
+            this._frameSubtitleLabel.set_label(
+                count === 0 ? _('Tap the add card to create Frame 1.') : _('%d image frame%s ready to edit.').format(count, count === 1 ? '' : 's')
+            );
+        }
+
+        this._syncFrameTileSelection();
+        this._updateSettingRows();
+    }
+
+    _buildFrameTile({ profile = null, isAdd = false, isActive = false }) {
+        const tile = new Gtk.Button({
+            width_request: 180,
+            height_request: 180,
+            halign: Gtk.Align.START,
+            valign: Gtk.Align.START,
+            hexpand: false,
+            vexpand: false,
+        });
+        tile.add_css_class('card');
+        tile.add_css_class('frame-tile');
+        if (isAdd)
+            tile.add_css_class('suggested-action');
+        if (isActive)
+            tile.add_css_class('selected');
+
+        const box = new Gtk.Box({
+            orientation: Gtk.Orientation.VERTICAL,
+            spacing: 10,
+            margin_top: 16,
+            margin_bottom: 16,
+            margin_start: 16,
+            margin_end: 16,
+            halign: Gtk.Align.FILL,
+            valign: Gtk.Align.FILL,
+        });
+        const icon = new Gtk.Image({
+            icon_name: isAdd ? 'list-add-symbolic' : 'folder-pictures-symbolic',
+            pixel_size: 34,
+            halign: Gtk.Align.START,
+        });
+        const title = new Gtk.Label({
+            label: isAdd ? _('Add image frame') : (profile.name || _('Image frame')),
+            xalign: 0,
+            wrap: true,
+        });
+        title.add_css_class('title-3');
+        const subtitle = new Gtk.Label({
+            label: isAdd ? _('Create a new frame') : _('Open its settings'),
+            xalign: 0,
+            wrap: true,
+        });
+        subtitle.add_css_class('dim-label');
+        const status = new Gtk.Label({
+            label: isAdd ? '' : (profile.visible === false ? _('Hidden') : _('Visible')),
+            xalign: 0,
+            wrap: true,
+        });
+        if (!isAdd)
+            status.add_css_class('caption');
+
+        box.append(icon);
+        box.append(title);
+        box.append(subtitle);
+        if (!isAdd)
+            box.append(status);
+        tile.set_child(box);
+        tile._titleLabel = title;
+        tile._subtitleLabel = subtitle;
+        tile._statusLabel = status;
+
+        if (isAdd) {
+            tile.connect('clicked', () => {
+                const profileToAdd = this._createProfile();
+                this._profiles.push(profileToAdd);
+                this._activeProfileId = profileToAdd.id;
+                this.settings.set_string('active-profile-id', profileToAdd.id);
+                this._saveProfiles();
+                this._refreshFrameDashboard();
+                this._updateSettingRows();
+                this._showSettingsPage();
+            });
+        } else {
+            tile.connect('clicked', () => {
+                this._setActiveFrame(profile.id);
+                this._showSettingsPage();
+            });
+        }
+
+        return tile;
+    }
+
+    _installFrameTileStyles() {
+        if (this._frameTileStyleProvider)
+            return;
+
+        this._frameTileStyleProvider = new Gtk.CssProvider();
+        this._frameTileStyleProvider.load_from_data(`
+            .frame-tile.selected {
+                box-shadow: inset 0 0 0 2px @accent_bg_color;
+            }
+
+            .frame-tile.selected:hover {
+                box-shadow: inset 0 0 0 2px @accent_bg_color;
+            }
+        `);
+
+        const display = Gdk.Display.get_default();
+        if (display) {
+            Gtk.StyleContext.add_provider_for_display(
+                display,
+                this._frameTileStyleProvider,
+                Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+            );
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -549,6 +814,8 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
                 setter(newValue);
             }
         });
+        row.set_value = value => scale.set_value(value);
+        row.get_value = () => scale.get_value();
         row.add_suffix(scale);
         row.activatable_widget = scale;
         return row;
