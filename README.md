@@ -1,24 +1,32 @@
-# Picture Desktop Widget for GNOME Shell
-## A GNOME Shell extension that places one or more desktop widgets on the background, each showing a random image from its own folder.
+# Dreams
+Eine kleine Datenbank an wiederverwendbaren Bausteinen zur Entwicklung von Videospielen
 
-This project is a GNOME Shell extension that creates desktop widgets which display random images selected from configurable folders. The extension now supports multiple widget profiles, so you can create several independent widgets that each use a different source directory, size, position, aspect ratio, corner radius, and refresh interval.
+## Git + Github + VSC setup
+1. [git downloaden](https://git-scm.com/install/)
+2. Github Account [erstellen](https://github.com/signup) oder [anmelden](https://github.com/login)
+3. Github Accountnamen im Discord mitteilen und auf Einladung zur Repo warten. Einladung dann annehmen
+4. Neues Verzeichnis lokal an sinnvollem Ort für MachinaBlue anlegen (z.B. `/gameProjects/Dreams`)
+5. In Visual Studio Code oder VS Codium diesen Projektordner öffnen
+6. Im Terminal folgende Befehle eingeben:
 
-Profiles can be selected and managed from the preferences dialog before changing the per-widget settings, making it easier to create multiple desktop widgets without mixing their configuration. The implementation uses cached file lists and lightweight refresh scheduling to keep image updates efficient while remaining responsive.
 
-![Gnome desktop with a widget showing an image on the top left of the screen](/docs/ExempleScreenshot.png)
+   ("my@mail.eu" durch entsprechende Adresse ersetzen)
+   
+   ```bash
+   git clone https://github.com/ZeysMockingjay/Picture-desktop-widget-remake
+   ```
 
-The extension can be downloaded from the GNOME Extensions website:
-[<img src="docs/gnome-extensions_logo.svg" height="100">](https://extensions.gnome.org/extension/8388/picture-desktop-widget/)
+   ```bash
+   cd Picture-desktop-widget-remake
+   ```
 
-## Developer resources
+   ```bash
+   git config user.name my-name
+   ```
+   ("my-name" durch Github Accountnamen ersetzen)
+   
+   ```bash
+   git config user.email my@mail.eu
+   ```
+   
 
-For extension development and debugging guidance, see:
-- GNOME Shell 50 porting guide: https://gjs.guide/extensions/upgrading/gnome-shell-50.html
-- Extension development docs: https://gjs.guide/extensions/development/creating.html
-- Debugging guide: https://gjs.guide/extensions/development/debugging.html
-
-## Find a bug or you have a suggestion?
-Don't hesitate to report any issue you found or any suggestion you have to make in order to improve the extension.
-
-## Like the project?
-Do not hesitate to share the extension!
