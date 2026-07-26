@@ -1,6 +1,3 @@
-# Dreams
-Eine kleine Datenbank an wiederverwendbaren Bausteinen zur Entwicklung von Videospielen
-
 ## Git + Github + VSC setup
 1. [git downloaden](https://git-scm.com/install/)
 2. Github Account [erstellen](https://github.com/signup) oder [anmelden](https://github.com/login)
