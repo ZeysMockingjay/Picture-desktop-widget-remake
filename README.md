@@ -4,6 +4,8 @@ A simple GNOME Shell extension that displays random images from a chosen folder 
 
 This project is a remake of the original Picture Desktop Widget idea, expanded with support for multiple frames and more flexible customization. Each widget can be placed independently on the screen and configured to match your desktop style.
 
+<img width="1022" height="607" alt="Screenshot From 2026-07-28 09-16-41" src="https://github.com/user-attachments/assets/1685aaba-2034-4da2-ab9c-29aabed64791" />
+
 ## Features
 
 - Create multiple desktop image widgets
@@ -36,8 +38,4 @@ The extension will be available from the GNOME Extensions website soon.
 
 If you find a bug or have a suggestion, feel free to open an issue in this repository.
 
-
-   ```bash
-   git config user.email my@mail.eu
-   ```
 
