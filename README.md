@@ -30,7 +30,7 @@ Credits:
 
 The extension will be available from the GNOME Extensions website soon.
 
-- GNOME Extensions page: [Will be added later]
+- GNOME Extensions page: https://extensions.gnome.org/extension/10581/picture-desktop-widget-remake/
 
 ## Contributing
 
