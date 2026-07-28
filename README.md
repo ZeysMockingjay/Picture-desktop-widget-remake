@@ -4,6 +4,8 @@ A simple GNOME Shell extension that displays random images from a chosen folder 
 
 This project is a remake of the original Picture Desktop Widget idea, expanded with support for multiple frames and more flexible customization. Each widget can be placed independently on the screen and configured to match your desktop style.
 
+<img width="1022" height="607" alt="Screenshot From 2026-07-28 09-16-41" src="https://github.com/user-attachments/assets/1685aaba-2034-4da2-ab9c-29aabed64791" />
+
 ## Features
 
 - Create multiple desktop image widgets
@@ -19,15 +21,11 @@ Version 16
 
 Maintained by:
 - Maximilian Rosenbaum
-- Elias-Leander Ahlers
+
 
 Credits:
-- Original creator: GaszokS
-- Based on Picture Desktop Widget
-
-Recent updates:
-- Added Dev page
-- Error capture
+- Elias-Leander Ahlers
+- Original creator: GaszokS: Based on Picture Desktop Widget
 
 ## Installation
 
@@ -40,34 +38,4 @@ The extension will be available from the GNOME Extensions website soon.
 
 If you find a bug or have a suggestion, feel free to open an issue in this repository.
 
----
-
-## Git + GitHub + VS Code setup
-
-1. [Git herunterladen](https://git-scm.com/install/)
-2. GitHub-Account [erstellen](https://github.com/signup) oder [anmelden](https://github.com/login)
-3. GitHub-Benutzernamen im Discord mitteilen und auf Einladung zur Repo warten; Einladung dann annehmen
-4. Neues Verzeichnis lokal an sinnvollem Ort anlegen (z. B. `/gameProjects/Dreams`)
-5. In Visual Studio Code oder VS Codium diesen Projektordner öffnen
-6. Im Terminal folgende Befehle eingeben:
-
-   ("my@mail.eu" durch die entsprechende Adresse ersetzen)
-
-   ```bash
-   git clone https://github.com/ZeysMockingjay/Picture-desktop-widget-remake
-   ```
-
-   ```bash
-   cd Picture-desktop-widget-remake
-   ```
-
-   ```bash
-   git config user.name my-name
-   ```
-
-   ("my-name" durch den GitHub-Benutzernamen ersetzen)
-
-   ```bash
-   git config user.email my@mail.eu
-   ```
 
