@@ -13,7 +13,6 @@ This project is a remake of the original Picture Desktop Widget idea, expanded w
 - Customize size, position, corner radius, and aspect ratio
 - Adjust how often new images are selected
 - Supports JPEG, PNG, GIF, BMP, and WebP images
-- Includes a developer page and error reporting for troubleshooting
 
 ## About
 
