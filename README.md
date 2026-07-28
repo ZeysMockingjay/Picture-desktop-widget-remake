@@ -32,7 +32,6 @@ Credits:
 The extension will be available from the GNOME Extensions website soon.
 
 - GNOME Extensions page: [Will be added later]
-- Screenshot: [Will be added later]
 
 ## Contributing
 
