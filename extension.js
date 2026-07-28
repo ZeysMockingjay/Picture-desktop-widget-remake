@@ -5,9 +5,25 @@ import Clutter from 'gi://Clutter';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import { Extension, gettext as _ } from 'resource:///org/gnome/shell/extensions/extension.js';
 
+/**
+ * Picture Desktop Widget extension
+ * - Manages multiple widget "profiles" each showing random images from a folder
+ * - Caches file lists per-profile and monitors directories for changes
+ * - Applies layout and CSS styling directly to St.Widget instances
+ *
+ * Performance notes:
+ * - Scanning is depth-limited and capped to avoid blocking on huge folders
+ * - Directory monitors trigger lightweight refreshes and mark profiles for rescans
+ */
+// Scanning limits to avoid blocking on extremely large folders
+const MAX_SCAN_DEPTH = 6;
+const MAX_SCAN_FILES = 20000;
+const SKIP_DOT_DIRS = true;
+
 export default class Picture_desktop_widget_extension extends Extension {
     enable() {
         this.settings = this.getSettings();
+        this._dirMonitors = new Map();
         this._profiles = this._normalizeProfiles(this._loadProfiles());
         this._widgetByProfileId = new Map();
         this._timeoutIds = new Map();
@@ -26,6 +42,7 @@ export default class Picture_desktop_widget_extension extends Extension {
             this._profiles.forEach(profile => {
                 this._createWidget(profile);
                 this._refreshProfile(profile, true);
+                this._installDirMonitor(profile);
                 this._scheduleProfileRefresh(profile);
             });
             this._saveProfiles(this._profiles);
@@ -62,11 +79,64 @@ export default class Picture_desktop_widget_extension extends Extension {
             }
         }
         this._widgetByProfileId.clear();
+        // Cancel any directory monitors
+        if (this._dirMonitors) {
+            for (const monitor of this._dirMonitors.values()) {
+                try {
+                    monitor.cancel();
+                } catch (e) {
+                    // ignore
+                }
+            }
+            this._dirMonitors.clear();
+        }
         this._profiles = [];
         this.settings = null;
     }
 
+    _installDirMonitor(profile) {
+        // Install a Gio.File monitor for `profile.imagePath` so that
+        // adding/removing files in the directory triggers an update.
+        // This is intentionally lightweight: we mark `requiresRescan` and
+        // trigger the normal refresh cycle rather than doing a full scan
+        // in the monitor callback.
+        if (!profile || !profile.imagePath) return;
+        if (!Gio.File.new_for_path(profile.imagePath).query_exists(null)) return;
+        try {
+            // Remove existing monitor for this profile if present
+            this._removeDirMonitor(profile.id);
+
+            const file = Gio.File.new_for_path(profile.imagePath);
+            const monitor = file.monitor_directory(Gio.FileMonitorFlags.NONE, null);
+            monitor.connect('changed', () => {
+                profile.requiresRescan = true;
+                // Trigger an immediate refresh cycle for this profile
+                this._refreshProfile(profile, false);
+                this._scheduleProfileRefresh(profile);
+            });
+            this._dirMonitors.set(profile.id, monitor);
+        } catch (e) {
+            // In case monitor creation fails, silently ignore but keep functionality
+            console.warn(`Failed to install monitor for ${profile.imagePath}: ${e}`);
+        }
+    }
+
+    _removeDirMonitor(profileId) {
+        // Cancel and remove a previously installed directory monitor.
+        if (!this._dirMonitors) return;
+        const monitor = this._dirMonitors.get(profileId);
+        if (monitor) {
+            try {
+                monitor.cancel();
+            } catch (e) {
+                // ignore
+            }
+            this._dirMonitors.delete(profileId);
+        }
+    }
+
     _createDefaultProfile() {
+        // Create a sane default profile used when none are configured.
         return this._normalizeProfile({
             id: `profile-${Math.random().toString(36).slice(2, 10)}`,
             name: 'Default widget',
@@ -87,6 +157,7 @@ export default class Picture_desktop_widget_extension extends Extension {
     }
 
     _normalizeProfile(profile = {}, fallback = {}) {
+        // Normalize profile values providing fallback defaults and type coercion.
         const hasOwnVisible = profile.visible !== undefined && fallback.visible !== undefined;
         const fallbackVisible = fallback.visible !== false;
 
@@ -157,6 +228,8 @@ export default class Picture_desktop_widget_extension extends Extension {
     }
 
     _loadProfiles() {
+        // Load serialized profiles from GSettings. Be defensive: a corrupt
+        // value should not crash the extension.
         try {
             const raw = this.settings.get_string('widget-profiles');
             const parsed = JSON.parse(raw);
@@ -180,6 +253,7 @@ export default class Picture_desktop_widget_extension extends Extension {
     }
 
     _createWidget(profile) {
+        // Create an St.Widget and attach it to GNOME's background group.
         if (this._widgetByProfileId.has(profile.id)) {
             return this._widgetByProfileId.get(profile.id);
         }
@@ -193,6 +267,8 @@ export default class Picture_desktop_widget_extension extends Extension {
     }
 
     _scheduleProfileRefresh(profile, elapsedSeconds = null) {
+        // Schedule the next refresh for `profile`, with optional adjustment
+        // if `elapsedSeconds` (time since last real update) is known.
         const id = profile.id;
         if (this._timeoutIds.has(id)) {
             GLib.Source.remove(this._timeoutIds.get(id));
@@ -247,6 +323,8 @@ export default class Picture_desktop_widget_extension extends Extension {
     }
 
     _selectRandomImage(profile, force = false) {
+        // Select a random image for `profile` from the cachedFiles (or
+        // rescan the folder if needed). Updates `profile.currentImagePath`.
         const widget = this._widgetByProfileId.get(profile.id);
         if (!widget) return;
 
@@ -267,6 +345,7 @@ export default class Picture_desktop_widget_extension extends Extension {
             profile.cachedFolderPath !== folderPath ||
             fileNames.length === 0;
         if (shouldRescan) {
+            // Rescan (synchronous, but capped by MAX_SCAN_* constants)
             fileNames = this._scanImageFiles(folderPath);
             profile.cachedFiles = fileNames;
             profile.cachedFolderPath = folderPath;
@@ -301,23 +380,31 @@ export default class Picture_desktop_widget_extension extends Extension {
         const folder = Gio.File.new_for_path(folderPath);
         const fileNames = [];
 
-        const scanDirectory = (directory, relativeBase = '') => {
+        // Depth-first directory scan with limits to avoid long blocking ops.
+        // Returns relative paths (from folderPath) of matching image files.
+        const scanDirectory = (directory, relativeBase = '', depth = 0) => {
+            if (depth >= MAX_SCAN_DEPTH) return;
             try {
                 const enumerator = directory.enumerate_children(
-                    'standard::name',
+                    'standard::name,standard::type',
                     Gio.FileQueryInfoFlags.NONE,
                     null
                 );
                 let info;
                 while ((info = enumerator.next_file(null)) !== null) {
+                    if (fileNames.length >= MAX_SCAN_FILES) break;
                     const childName = info.get_name();
+                    // Skip dot-directories like .cache or .git
+                    if (SKIP_DOT_DIRS && childName.startsWith('.')) {
+                        continue;
+                    }
                     const childPath = directory.get_child(childName);
                     const relative = relativeBase
                         ? `${relativeBase}/${childName}`
                         : childName;
 
                     if (info.get_file_type() === Gio.FileType.DIRECTORY) {
-                        scanDirectory(childPath, relative);
+                        scanDirectory(childPath, relative, depth + 1);
                     } else if (imageExtensions.some(
                         ext => childName.toLowerCase().endsWith(ext)
                     )) {
@@ -337,6 +424,8 @@ export default class Picture_desktop_widget_extension extends Extension {
     }
 
     _updateWidgetAppearance(widget, profile) {
+        // Apply sizing, corner-radius, and either placeholder text or a
+        // background image URI to the widget's inline CSS.
         const radiusPercent = Math.max(0, profile.widgetCornerRadius || 0) / 100;
         const size = Math.max(20, profile.widgetSize || 200);
         const aspectRatio = Math.max(0.25, profile.widgetAspectRatio || 1.0);
@@ -411,6 +500,9 @@ export default class Picture_desktop_widget_extension extends Extension {
     }
 
     _reloadProfiles = () => {
+        // Reload profiles from GSettings and reconcile with in-memory state.
+        // This preserves runtime-only fields (currentImagePath, cachedFiles,
+        // etc.) by merging them back into incoming profiles.
         if (this._reloadingProfiles) return;
         this._reloadingProfiles = true;
 
@@ -429,6 +521,8 @@ export default class Picture_desktop_widget_extension extends Extension {
                     const tid = this._timeoutIds.get(id);
                     if (tid) GLib.Source.remove(tid);
                     this._timeoutIds.delete(id);
+                    // Remove any directory monitor for the deleted profile
+                    this._removeDirMonitor(id);
                 }
             }
 
@@ -441,6 +535,7 @@ export default class Picture_desktop_widget_extension extends Extension {
                     // Brand new profile
                     this._createWidget(profile);
                     this._refreshProfile(profile, true);
+                    this._installDirMonitor(profile);
                     this._scheduleProfileRefresh(profile);
                     continue;
                 }
@@ -465,10 +560,20 @@ export default class Picture_desktop_widget_extension extends Extension {
                     _statusMessage: existing._statusMessage,
                 };
 
+                // If the image path changed, remove any existing directory monitor
+                if (imagePathChanged) {
+                    this._removeDirMonitor(profile.id);
+                }
+
                 // Merge incoming values into the existing (preserving in-memory ref)
                 // so that mutations from _refreshProfile/_selectRandomImage are kept
                 Object.assign(existing, profile);
                 Object.assign(existing, runtimeState);
+
+                // Install directory monitor for the new path if it changed
+                if (imagePathChanged) {
+                    this._installDirMonitor(existing);
+                }
 
                 if (!imagePathChanged) {
                     existing.requiresRescan = false;

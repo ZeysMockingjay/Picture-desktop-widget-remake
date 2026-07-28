@@ -11,6 +11,7 @@ import { ExtensionPreferences, gettext as _ } from 'resource:///org/gnome/Shell/
 export default class PictureDesktopWidgetPreferences extends ExtensionPreferences {
     fillPreferencesWindow(window) {
         this.settings = this.getSettings();
+        window.set_title(_('Picture Desktop Widget Remake'));
         this._profiles = this._normalizeProfiles(this._loadProfiles());
         this._activeProfileId = this.settings.get_string('active-profile-id') ||
                                 this._profiles[0]?.id || '';
@@ -30,6 +31,8 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
         this._deleteFrameButton = null;
         this._profileSaveTimeoutId = 0;
         this._frameTileStyleProvider = null;
+        this._developerErrorLabel = null;
+        this._lastDeveloperError = _('No developer errors recorded yet.');
 
         const page = new Adw.PreferencesPage();
         page.set_title(_('Image Frames'));
@@ -96,6 +99,36 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
             vexpand: true,
         });
         shellBox.append(this._frameStack);
+
+        const developerBox = new Gtk.Box({
+            orientation: Gtk.Orientation.VERTICAL,
+            spacing: 12,
+            hexpand: true,
+            vexpand: true,
+        });
+        const developerScroll = new Gtk.ScrolledWindow({
+            hexpand: true,
+            vexpand: true,
+            hscrollbar_policy: Gtk.PolicyType.NEVER,
+        });
+        const developerContent = new Gtk.Box({
+            orientation: Gtk.Orientation.VERTICAL,
+            spacing: 12,
+            hexpand: true,
+            vexpand: true,
+        });
+        developerScroll.set_child(developerContent);
+        this._developerErrorLabel = new Gtk.Label({
+            label: this._lastDeveloperError,
+            xalign: 0,
+            wrap: true,
+            selectable: true,
+            valign: Gtk.Align.START,
+        });
+        this._developerErrorLabel.add_css_class('dim-label');
+        developerContent.append(this._developerErrorLabel);
+        developerBox.append(developerScroll);
+        this._frameStack.add_named(developerBox, 'developer');
 
         const dashboardBox = new Gtk.Box({
             orientation: Gtk.Orientation.VERTICAL,
@@ -336,6 +369,14 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
         this._updateSettingRows();
     }
 
+    /**
+     * Preferences UI notes:
+     * - The preferences window manages multiple "frames" (profiles) and
+     *   exposes a dashboard with tiles and a detailed settings page.
+     * - UI helpers below create reusable rows (spin, slider, folder chooser)
+     *   following GNOME HIG patterns.
+     */
+
     // -----------------------------------------------------------------------
     // Profile helpers
     // -----------------------------------------------------------------------
@@ -420,7 +461,9 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
             const parsed = JSON.parse(raw);
             if (Array.isArray(parsed)) return parsed;
         } catch (error) {
-            console.warn(`Unable to parse image frame settings: ${error}`);
+            const message = `Unable to parse image frame settings: ${error}`;
+            this._recordDeveloperError(message);
+            console.warn(message);
         }
         return [];
     }
@@ -534,18 +577,44 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
             this._frameStack.set_visible_child_name('settings');
     }
 
+    _recordDeveloperError(message) {
+        this._lastDeveloperError = message || _('No developer errors recorded yet.');
+        if (this._developerErrorLabel)
+            this._developerErrorLabel.set_label(this._lastDeveloperError);
+    }
+
+    _showDeveloperPage() {
+        if (this._frameStack)
+            this._frameStack.set_visible_child_name('developer');
+        this._recordDeveloperError(this._lastDeveloperError);
+    }
+
+    _getExtensionVersion() {
+        const version = this.metadata?.version;
+        if (version !== undefined && version !== null && version !== '')
+            return String(version);
+        return _('Unknown');
+    }
+
     _showAboutDialog(window) {
         const dialog = new Adw.MessageDialog({
             transient_for: window,
             heading: _('Picture Desktop Widget Remake'),
             body: _(
-                'Version 13\nSupports JPEG, PNG, GIF, BMP, and WebP images.\n\nMaintained by:\nMaximilian Rosenbaum\nElias-Leander Ahlers\n\nCredits:\nOriginal creator: GaszokS\nBased on Picture desktop widget.'
-            ),
+                'Version %s\nSupports JPEG, PNG, GIF, BMP, and WebP images.\n\nMaintained by:\nMaximilian Rosenbaum\nElias-Leander Ahlers\n\nCredits:\nOriginal creator: GaszokS\nBased on Picture desktop widget.\n\nRecent: Added Dev page; error capture'
+            ).format(this._getExtensionVersion()),
             close_response: 'close',
         });
         dialog.add_response('close', _('_Close'));
+        dialog.add_response('dev-page', _('Dev page'));
         dialog.set_default_response('close');
-        dialog.connect('response', dlg => dlg.destroy());
+        dialog.connect('response', (dlg, response) => {
+            if (response === 'dev-page') {
+                this._showDeveloperPage();
+                dlg.destroy();
+                return;
+            }
+            dlg.destroy();      });
         dialog.present();
     }
 
@@ -563,9 +632,9 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
     _syncFrameTileSelection() {
         for (const [profileId, tile] of this._frameCards) {
             if (profileId === this._activeProfileId)
-                tile.add_css_class('selected');
+                tile.add_css_class('frame-selected');
             else
-                tile.remove_css_class('selected');
+                tile.remove_css_class('frame-selected');
         }
     }
 
@@ -652,9 +721,12 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
     }
 
     _buildFrameTile({ profile = null, isAdd = false, isActive = false }) {
+        // Build a clickable tile used on the dashboard representing a
+        // profile (or the add-new tile). Tiles are fixed-size buttons
+        // that contain an icon, title, subtitle and optional status line.
         const tile = new Gtk.Button({
-            width_request: 180,
-            height_request: 180,
+            width_request: 200,
+            height_request: 200,
             halign: Gtk.Align.START,
             valign: Gtk.Align.START,
             hexpand: false,
@@ -665,15 +737,15 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
         if (isAdd)
             tile.add_css_class('suggested-action');
         if (isActive)
-            tile.add_css_class('selected');
+            tile.add_css_class('frame-selected');
 
         const box = new Gtk.Box({
             orientation: Gtk.Orientation.VERTICAL,
             spacing: 10,
-            margin_top: 16,
-            margin_bottom: 16,
-            margin_start: 16,
-            margin_end: 16,
+            margin_top: 12,
+            margin_bottom: 12,
+            margin_start: 12,
+            margin_end: 12,
             halign: Gtk.Align.FILL,
             valign: Gtk.Align.FILL,
         });
@@ -734,16 +806,18 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
     }
 
     _installFrameTileStyles() {
+        // Provide small CSS tweaks for selected tiles. Ensures a consistent
+        // visual treatment across themes.
         if (this._frameTileStyleProvider)
             return;
 
         this._frameTileStyleProvider = new Gtk.CssProvider();
         this._frameTileStyleProvider.load_from_data(`
-            .frame-tile.selected {
+            .frame-tile.frame-selected {
                 box-shadow: inset 0 0 0 2px @accent_bg_color;
             }
 
-            .frame-tile.selected:hover {
+            .frame-tile.frame-selected:hover {
                 box-shadow: inset 0 0 0 2px @accent_bg_color;
             }
         `);
