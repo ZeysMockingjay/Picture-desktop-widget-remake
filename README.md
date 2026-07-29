@@ -16,7 +16,7 @@ This project is a remake of the original Picture Desktop Widget idea, expanded w
 
 ## About
 
-Version 16
+Version 17
 
 Maintained by:
 - Maximilian Rosenbaum
