@@ -9,7 +9,11 @@
     "46", "47", "48", "49", "50"
   ],
   "url": "https://github.com/ZeysMockingjay/Picture-desktop-widget-remake",
-  "uuid": "Picture-desktop-widget-remake",
+  "uuid": "picture-desktop-widget-remake",
   "version": 16,
-  "release-notes": "Added Dev page; error capture"
+  "release-notes": "Added Dev page; error capture",
+  "donations": {
+    "github": "ZeysMockingjay",
+    "buymeacoffee": "MaximilianRosenbaum"
+  }
 }

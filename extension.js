@@ -24,6 +24,7 @@ export default class Picture_desktop_widget_extension extends Extension {
     enable() {
         this.settings = this.getSettings();
         this._dirMonitors = new Map();
+        this._dirMonitorSignalIds = new Map();
         this._profiles = this._normalizeProfiles(this._loadProfiles());
         this._widgetByProfileId = new Map();
         this._timeoutIds = new Map();
@@ -81,14 +82,20 @@ export default class Picture_desktop_widget_extension extends Extension {
         this._widgetByProfileId.clear();
         // Cancel any directory monitors
         if (this._dirMonitors) {
-            for (const monitor of this._dirMonitors.values()) {
+            for (const [profileId, monitor] of this._dirMonitors.entries()) {
                 try {
+                    const signalId = this._dirMonitorSignalIds?.get(profileId);
+                    if (signalId) {
+                        monitor.disconnect(signalId);
+                        this._dirMonitorSignalIds.delete(profileId);
+                    }
                     monitor.cancel();
                 } catch (e) {
                     // ignore
                 }
             }
             this._dirMonitors.clear();
+            this._dirMonitorSignalIds?.clear();
         }
         this._profiles = [];
         this.settings = null;
@@ -108,13 +115,14 @@ export default class Picture_desktop_widget_extension extends Extension {
 
             const file = Gio.File.new_for_path(profile.imagePath);
             const monitor = file.monitor_directory(Gio.FileMonitorFlags.NONE, null);
-            monitor.connect('changed', () => {
+            const signalId = monitor.connect('changed', () => {
                 profile.requiresRescan = true;
                 // Trigger an immediate refresh cycle for this profile
                 this._refreshProfile(profile, false);
                 this._scheduleProfileRefresh(profile);
             });
             this._dirMonitors.set(profile.id, monitor);
+            this._dirMonitorSignalIds.set(profile.id, signalId);
         } catch (e) {
             // In case monitor creation fails, silently ignore but keep functionality
             console.warn(`Failed to install monitor for ${profile.imagePath}: ${e}`);
@@ -127,6 +135,11 @@ export default class Picture_desktop_widget_extension extends Extension {
         const monitor = this._dirMonitors.get(profileId);
         if (monitor) {
             try {
+                const signalId = this._dirMonitorSignalIds?.get(profileId);
+                if (signalId) {
+                    monitor.disconnect(signalId);
+                    this._dirMonitorSignalIds.delete(profileId);
+                }
                 monitor.cancel();
             } catch (e) {
                 // ignore
