@@ -8,6 +8,11 @@ import Gdk from 'gi://Gdk';
 
 import { ExtensionPreferences, gettext as _ } from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
 
+const FRAME_TILE_SIZE = 200;
+const FRAME_TILE_PADDING = 12;
+const FRAME_TILE_SPACING = 10;
+const SUPPORTED_IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg'];
+
 export default class PictureDesktopWidgetPreferences extends ExtensionPreferences {
     fillPreferencesWindow(window) {
         this.settings = this.getSettings();
@@ -81,7 +86,7 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
         });
         this._frameTitleLabel.add_css_class('title-1');
         this._frameSubtitleLabel = new Gtk.Label({
-            label: _('Tap the add card to create Frame 1.'),
+            label: _('Tap the add card to create frame 1.'),
             xalign: 0,
             wrap: true,
         });
@@ -146,7 +151,7 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
             valign: Gtk.Align.START,
             row_spacing: 14,
             column_spacing: 14,
-            homogeneous: true,
+            homogeneous: false,
             max_children_per_line: 4,
         });
         dashboardScroll.set_child(this._frameDashboardFlow);
@@ -240,7 +245,7 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
         frameGroup.add(this._visibleRow);
 
         this._deleteFrameRow = new Adw.ActionRow({
-            title: _('Delete Image Frame'),
+            title: _('Delete image frame'),
             subtitle: _('Remove this frame. At least one frame must remain.'),
         });
         this._deleteFrameButton = Gtk.Button.new_from_icon_name('user-trash-symbolic');
@@ -356,7 +361,6 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
         this._frameStack.add_named(settingsBox, 'settings');
 
         this._refreshFrameDashboard();
-        this._updateSettingRows();
         this._showDashboard();
         this._installFrameTileStyles();
 
@@ -534,7 +538,7 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
             if (this._frameTitleLabel)
                 this._frameTitleLabel.set_label(_('Image Frames'));
             if (this._frameSubtitleLabel)
-                this._frameSubtitleLabel.set_label(_('Tap the add card to create Frame 1.'));
+                this._frameSubtitleLabel.set_label(_('Tap the add card to create frame 1.'));
             return;
         }
 
@@ -601,12 +605,13 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
             transient_for: window,
             heading: _('Picture Desktop Widget Remake'),
             body: _(
-                'Version %s\nSupports JPEG, PNG, GIF, BMP, and WebP images.\n\nMaintained by:\nMaximilian Rosenbaum\nElias-Leander Ahlers\n\nCredits:\nOriginal creator: GaszokS\nBased on Picture desktop widget.\n\nRecent: Added Dev page; error capture'
+                'Version %s\nSupports JPEG, PNG, GIF, BMP, and WebP images.\n\nMaintained by:\nMaximilian Rosenbaum\nElias-Leander Ahlers\n\nCredits:\nOriginal creator: GaszokS\nBased on Picture Desktop Widget.\n\nRecent: Added developer page and error capture'
             ).format(this._getExtensionVersion()),
             close_response: 'close',
         });
         dialog.add_response('close', _('_Close'));
-        dialog.add_response('dev-page', _('Dev page'));
+        dialog.add_response('dev-page', _('Developer page'));
+        dialog.add_response('buy-me-a-coffee', _('Buy Me a Coffee'));
         dialog.set_default_response('close');
         dialog.connect('response', (dlg, response) => {
             if (response === 'dev-page') {
@@ -614,8 +619,24 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
                 dlg.destroy();
                 return;
             }
-            dlg.destroy();      });
+            if (response === 'buy-me-a-coffee') {
+                this._openExternalUrl('https://buymeacoffee.com/MaximilianRosenbaum', window);
+                dlg.destroy();
+                return;
+            }
+            dlg.destroy();
+        });
         dialog.present();
+    }
+
+    _openExternalUrl(url, window) {
+        try {
+            Gtk.show_uri(window, url, Gdk.CURRENT_TIME);
+        } catch (error) {
+            const message = `Unable to open URL ${url}: ${error}`;
+            this._recordDeveloperError(message);
+            console.warn(message);
+        }
     }
 
     _syncActiveFrameHeaders(profile) {
@@ -712,7 +733,7 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
         if (this._frameSubtitleLabel) {
             const count = this._profiles.length;
             this._frameSubtitleLabel.set_label(
-                count === 0 ? _('Tap the add card to create Frame 1.') : _('%d image frame%s ready to edit.').format(count, count === 1 ? '' : 's')
+                count === 0 ? _('Tap the add card to create frame 1.') : _('%d image frame%s ready to edit.').format(count, count === 1 ? '' : 's')
             );
         }
 
@@ -725,8 +746,8 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
         // profile (or the add-new tile). Tiles are fixed-size buttons
         // that contain an icon, title, subtitle and optional status line.
         const tile = new Gtk.Button({
-            width_request: 200,
-            height_request: 200,
+            width_request: FRAME_TILE_SIZE,
+            height_request: FRAME_TILE_SIZE,
             halign: Gtk.Align.START,
             valign: Gtk.Align.START,
             hexpand: false,
@@ -741,36 +762,42 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
 
         const box = new Gtk.Box({
             orientation: Gtk.Orientation.VERTICAL,
-            spacing: 10,
-            margin_top: 12,
-            margin_bottom: 12,
-            margin_start: 12,
-            margin_end: 12,
+            spacing: FRAME_TILE_SPACING,
+            margin_top: FRAME_TILE_PADDING,
+            margin_bottom: FRAME_TILE_PADDING,
+            margin_start: FRAME_TILE_PADDING,
+            margin_end: FRAME_TILE_PADDING,
             halign: Gtk.Align.FILL,
             valign: Gtk.Align.FILL,
         });
         const icon = new Gtk.Image({
             icon_name: isAdd ? 'list-add-symbolic' : 'folder-pictures-symbolic',
             pixel_size: 34,
-            halign: Gtk.Align.START,
+            halign: Gtk.Align.CENTER,
         });
         const title = new Gtk.Label({
             label: isAdd ? _('Add image frame') : (profile.name || _('Image frame')),
-            xalign: 0,
+            xalign: 0.5,
+            justify: Gtk.Justification.CENTER,
             wrap: true,
         });
+        title.set_halign(Gtk.Align.CENTER);
         title.add_css_class('title-3');
         const subtitle = new Gtk.Label({
             label: isAdd ? _('Create a new frame') : _('Open its settings'),
-            xalign: 0,
+            xalign: 0.5,
+            justify: Gtk.Justification.CENTER,
             wrap: true,
         });
+        subtitle.set_halign(Gtk.Align.CENTER);
         subtitle.add_css_class('dim-label');
         const status = new Gtk.Label({
             label: isAdd ? '' : (profile.visible === false ? _('Hidden') : _('Visible')),
-            xalign: 0,
+            xalign: 0.5,
+            justify: Gtk.Justification.CENTER,
             wrap: true,
         });
+        status.set_halign(Gtk.Align.CENTER);
         if (!isAdd)
             status.add_css_class('caption');
 
@@ -813,6 +840,12 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
 
         this._frameTileStyleProvider = new Gtk.CssProvider();
         this._frameTileStyleProvider.load_from_data(`
+            .frame-tile {
+                min-width: ${FRAME_TILE_SIZE}px;
+                min-height: ${FRAME_TILE_SIZE}px;
+                padding: 0;
+            }
+
             .frame-tile.frame-selected {
                 box-shadow: inset 0 0 0 2px @accent_bg_color;
             }
@@ -936,12 +969,7 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
                             let info;
                             while ((info = enumerator.next_file(null)) !== null) {
                                 const name = info.get_name().toLowerCase();
-                                if (name.endsWith('.jpg') ||
-                                    name.endsWith('.jpeg') ||
-                                    name.endsWith('.png') ||
-                                    name.endsWith('.gif') ||
-                                    name.endsWith('.bmp') ||
-                                    name.endsWith('.webp')) {
+                                if (SUPPORTED_IMAGE_EXTENSIONS.some(ext => name.endsWith(ext))) {
                                     count++;
                                 }
                             }
@@ -952,8 +980,10 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
                                 );
                             }
                         }
-                    } catch (_e) {
-                        // Silently ignore subtitle count errors
+                    } catch (error) {
+                        const message = `Unable to count images in selected folder: ${error}`;
+                        this._recordDeveloperError(message);
+                        console.warn(message);
                     }
                 }
                 dlg.destroy();

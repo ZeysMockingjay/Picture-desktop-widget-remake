@@ -19,8 +19,9 @@ import { Extension, gettext as _ } from 'resource:///org/gnome/shell/extensions/
 const MAX_SCAN_DEPTH = 6;
 const MAX_SCAN_FILES = 20000;
 const SKIP_DOT_DIRS = true;
+const SUPPORTED_IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg'];
 
-export default class Picture_desktop_widget_extension extends Extension {
+export default class PictureDesktopWidgetExtension extends Extension {
     enable() {
         this.settings = this.getSettings();
         this._dirMonitors = new Map();
@@ -82,17 +83,8 @@ export default class Picture_desktop_widget_extension extends Extension {
         this._widgetByProfileId.clear();
         // Cancel any directory monitors
         if (this._dirMonitors) {
-            for (const [profileId, monitor] of this._dirMonitors.entries()) {
-                try {
-                    const signalId = this._dirMonitorSignalIds?.get(profileId);
-                    if (signalId) {
-                        monitor.disconnect(signalId);
-                        this._dirMonitorSignalIds.delete(profileId);
-                    }
-                    monitor.cancel();
-                } catch (e) {
-                    // ignore
-                }
+            for (const profileId of this._dirMonitors.keys()) {
+                this._removeDirMonitor(profileId);
             }
             this._dirMonitors.clear();
             this._dirMonitorSignalIds?.clear();
@@ -107,8 +99,10 @@ export default class Picture_desktop_widget_extension extends Extension {
         // This is intentionally lightweight: we mark `requiresRescan` and
         // trigger the normal refresh cycle rather than doing a full scan
         // in the monitor callback.
-        if (!profile || !profile.imagePath) return;
-        if (!Gio.File.new_for_path(profile.imagePath).query_exists(null)) return;
+        if (!profile || !profile.imagePath)
+            return;
+        if (!Gio.File.new_for_path(profile.imagePath).query_exists(null))
+            return;
         try {
             // Remove existing monitor for this profile if present
             this._removeDirMonitor(profile.id);
@@ -123,28 +117,38 @@ export default class Picture_desktop_widget_extension extends Extension {
             });
             this._dirMonitors.set(profile.id, monitor);
             this._dirMonitorSignalIds.set(profile.id, signalId);
-        } catch (e) {
-            // In case monitor creation fails, silently ignore but keep functionality
-            console.warn(`Failed to install monitor for ${profile.imagePath}: ${e}`);
+        } catch (error) {
+            console.warn(`Failed to install monitor for ${profile.imagePath}: ${error}`);
         }
     }
 
     _removeDirMonitor(profileId) {
         // Cancel and remove a previously installed directory monitor.
-        if (!this._dirMonitors) return;
+        if (!this._dirMonitors)
+            return;
         const monitor = this._dirMonitors.get(profileId);
         if (monitor) {
-            try {
-                const signalId = this._dirMonitorSignalIds?.get(profileId);
-                if (signalId) {
-                    monitor.disconnect(signalId);
-                    this._dirMonitorSignalIds.delete(profileId);
-                }
-                monitor.cancel();
-            } catch (e) {
-                // ignore
-            }
+            const signalId = this._dirMonitorSignalIds?.get(profileId) || 0;
+            this._disconnectAndCancelMonitor(monitor, signalId);
+            this._dirMonitorSignalIds?.delete(profileId);
             this._dirMonitors.delete(profileId);
+        }
+    }
+
+    _disconnectAndCancelMonitor(monitor, signalId) {
+        if (!monitor)
+            return;
+        if (signalId) {
+            try {
+                monitor.disconnect(signalId);
+            } catch (error) {
+                console.warn(`Failed to disconnect file monitor signal: ${error}`);
+            }
+        }
+        try {
+            monitor.cancel();
+        } catch (error) {
+            console.warn(`Failed to cancel file monitor: ${error}`);
         }
     }
 
@@ -171,8 +175,8 @@ export default class Picture_desktop_widget_extension extends Extension {
 
     _normalizeProfile(profile = {}, fallback = {}) {
         // Normalize profile values providing fallback defaults and type coercion.
-        const hasOwnVisible = profile.visible !== undefined && fallback.visible !== undefined;
-        const fallbackVisible = fallback.visible !== false;
+        const profileVisible = profile.visible;
+        const fallbackVisible = fallback.visible;
 
         const normalized = {
             id: profile.id ||
@@ -220,9 +224,9 @@ export default class Picture_desktop_widget_extension extends Extension {
                 ? profile.cachedFiles
                 : (Array.isArray(fallback.cachedFiles) ? fallback.cachedFiles : []),
             cachedFolderPath: profile.cachedFolderPath ?? fallback.cachedFolderPath ?? '',
-            visible: hasOwnVisible
-                ? (profile.visible !== false && fallback.visible !== false)
-                : (profile.visible !== false),
+            visible: profileVisible === undefined
+                ? fallbackVisible !== false
+                : profileVisible !== false,
             requiresRescan: profile.requiresRescan === true ||
                             fallback.requiresRescan === true ||
                             (profile.requiresRescan === undefined &&
@@ -249,8 +253,8 @@ export default class Picture_desktop_widget_extension extends Extension {
             if (Array.isArray(parsed)) {
                 return parsed;
             }
-        } catch (e) {
-            console.warn(`Unable to parse widget profiles: ${e}`);
+        } catch (error) {
+            console.warn(`Unable to parse widget profiles: ${error}`);
         }
         return [];
     }
@@ -382,14 +386,13 @@ export default class Picture_desktop_widget_extension extends Extension {
 
         const randomIndex = Math.floor(Math.random() * fileNames.length);
         const randomFile = fileNames[randomIndex];
-        profile.currentImagePath = `${folderPath}/${randomFile}`;
+        profile.currentImagePath = GLib.build_filenamev([folderPath, randomFile]);
         profile.timeLastUpdate = Math.floor(Date.now() / 1000);
         profile._statusMessage = '';
         this._updateWidgetAppearance(widget, profile);
     }
 
     _scanImageFiles(folderPath) {
-        const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg'];
         const folder = Gio.File.new_for_path(folderPath);
         const fileNames = [];
 
@@ -418,7 +421,7 @@ export default class Picture_desktop_widget_extension extends Extension {
 
                     if (info.get_file_type() === Gio.FileType.DIRECTORY) {
                         scanDirectory(childPath, relative, depth + 1);
-                    } else if (imageExtensions.some(
+                    } else if (SUPPORTED_IMAGE_EXTENSIONS.some(
                         ext => childName.toLowerCase().endsWith(ext)
                     )) {
                         fileNames.push(relative);
