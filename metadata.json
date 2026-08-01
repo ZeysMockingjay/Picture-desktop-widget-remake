@@ -4,13 +4,12 @@
   "name": "Picture Desktop Widget Remake",
   "settings-schema": "org.gnome.shell.extensions.Picture-desktop-widget",
   "shell-version": [
-    "46", "47", "48", "49"
+    "46", "47", "48", "49", "50"
   ],
   "url": "https://github.com/ZeysMockingjay/Picture-desktop-widget-remake",
   "uuid": "picture-desktop-remake@ZeysMockingjay.Github.com",
-  "version": 20,
+  "version": 25,
   "donations": {
-    "github": "ZeysMockingjay",
     "buymeacoffee": "MaximilianRosenbaum"
   }
 }

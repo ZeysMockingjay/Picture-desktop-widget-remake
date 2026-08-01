@@ -2,9 +2,9 @@
 
 import Adw from 'gi://Adw';
 import Gtk from 'gi://Gtk';
+import Gdk from 'gi://Gdk';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
-import Gdk from 'gi://Gdk';
 
 import { ExtensionPreferences, gettext as _ } from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
 
@@ -14,9 +14,36 @@ const FRAME_TILE_SPACING = 10;
 const SUPPORTED_IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg'];
 
 export default class PictureDesktopWidgetPreferences extends ExtensionPreferences {
+    _createActionButton(label, iconName, cssClass = '') {
+        const button = new Gtk.Button();
+        const content = new Gtk.Box({
+            orientation: Gtk.Orientation.HORIZONTAL,
+            spacing: 6,
+            halign: Gtk.Align.CENTER,
+            valign: Gtk.Align.CENTER,
+        });
+        const icon = new Gtk.Image({
+            icon_name: iconName,
+            pixel_size: 16,
+            halign: Gtk.Align.CENTER,
+            valign: Gtk.Align.CENTER,
+        });
+        const text = new Gtk.Label({
+            label,
+            xalign: 0,
+        });
+        content.append(icon);
+        content.append(text);
+        button.set_child(content);
+        for (const cls of cssClass.split(/\s+/).filter(Boolean))
+            button.add_css_class(cls);
+        return button;
+    }
+
     fillPreferencesWindow(window) {
         this.settings = this.getSettings();
         window.set_title(_('Picture Desktop Widget Remake'));
+        window.set_default_size(780, 700);
         this._profiles = this._normalizeProfiles(this._loadProfiles());
         this._activeProfileId = this.settings.get_string('active-profile-id') ||
                                 this._profiles[0]?.id || '';
@@ -27,41 +54,30 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
         this._frameCards = new Map();
         this._frameStack = null;
         this._frameDashboardFlow = null;
-        this._frameTitleLabel = null;
-        this._frameSubtitleLabel = null;
         this._settingsHeaderTitle = null;
         this._settingsHeaderSubtitle = null;
         this._settingsPageButton = null;
-        this._deleteFrameRow = null;
         this._deleteFrameButton = null;
         this._profileSaveTimeoutId = 0;
         this._frameTileStyleProvider = null;
-        this._developerErrorLabel = null;
-        this._lastDeveloperError = _('No developer errors recorded yet.');
 
         const page = new Adw.PreferencesPage();
         page.set_title(_('Image Frames'));
         page.set_name(_('Image Frames'));
-
         const toolbarView = new Adw.ToolbarView();
-        const titlebar = new Gtk.HeaderBar({
+        const headerBar = new Gtk.HeaderBar({
             show_title_buttons: true,
         });
         const aboutButton = Gtk.Button.new_from_icon_name('help-about-symbolic');
         aboutButton.add_css_class('flat');
         aboutButton.set_tooltip_text(_('About'));
         aboutButton.connect('clicked', () => this._showAboutDialog(window));
-        titlebar.pack_end(aboutButton);
-        toolbarView.add_top_bar(titlebar);
+        headerBar.pack_end(aboutButton);
+        toolbarView.add_top_bar(headerBar);
         toolbarView.set_content(page);
         window.set_content(toolbarView);
 
         const shellGroup = new Adw.PreferencesGroup();
-        shellGroup.set_title(_('Image Frames'));
-        shellGroup.set_description(
-            _('Tap the add card to create a new frame, then open it to edit its settings.')
-        );
-
         const shellBox = new Gtk.Box({
             orientation: Gtk.Orientation.VERTICAL,
             spacing: 18,
@@ -69,33 +85,34 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
         shellGroup.add(shellBox);
         page.add(shellGroup);
 
-        const headerRow = new Gtk.Box({
+        const headerBox = new Gtk.Box({
             orientation: Gtk.Orientation.HORIZONTAL,
             spacing: 12,
             hexpand: true,
+            margin_bottom: 6,
         });
         const headerText = new Gtk.Box({
             orientation: Gtk.Orientation.VERTICAL,
             spacing: 4,
             hexpand: true,
         });
-        this._frameTitleLabel = new Gtk.Label({
+        const headerTitle = new Gtk.Label({
             label: _('Image Frames'),
             xalign: 0,
             wrap: true,
         });
-        this._frameTitleLabel.add_css_class('title-1');
-        this._frameSubtitleLabel = new Gtk.Label({
-            label: _('Tap the add card to create frame 1.'),
+        headerTitle.add_css_class('title-1');
+        const headerSubtitle = new Gtk.Label({
+            label: _('Create and edit image frames for your desktop.'),
             xalign: 0,
             wrap: true,
         });
-        this._frameSubtitleLabel.add_css_class('dim-label');
-        headerText.append(this._frameTitleLabel);
-        headerText.append(this._frameSubtitleLabel);
+        headerSubtitle.add_css_class('dim-label');
+        headerText.append(headerTitle);
+        headerText.append(headerSubtitle);
 
-        headerRow.append(headerText);
-        shellBox.append(headerRow);
+        headerBox.append(headerText);
+        shellBox.append(headerBox);
 
         this._frameStack = new Gtk.Stack({
             transition_type: Gtk.StackTransitionType.SLIDE_LEFT_RIGHT,
@@ -104,36 +121,6 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
             vexpand: true,
         });
         shellBox.append(this._frameStack);
-
-        const developerBox = new Gtk.Box({
-            orientation: Gtk.Orientation.VERTICAL,
-            spacing: 12,
-            hexpand: true,
-            vexpand: true,
-        });
-        const developerScroll = new Gtk.ScrolledWindow({
-            hexpand: true,
-            vexpand: true,
-            hscrollbar_policy: Gtk.PolicyType.NEVER,
-        });
-        const developerContent = new Gtk.Box({
-            orientation: Gtk.Orientation.VERTICAL,
-            spacing: 12,
-            hexpand: true,
-            vexpand: true,
-        });
-        developerScroll.set_child(developerContent);
-        this._developerErrorLabel = new Gtk.Label({
-            label: this._lastDeveloperError,
-            xalign: 0,
-            wrap: true,
-            selectable: true,
-            valign: Gtk.Align.START,
-        });
-        this._developerErrorLabel.add_css_class('dim-label');
-        developerContent.append(this._developerErrorLabel);
-        developerBox.append(developerScroll);
-        this._frameStack.add_named(developerBox, 'developer');
 
         const dashboardBox = new Gtk.Box({
             orientation: Gtk.Orientation.VERTICAL,
@@ -149,8 +136,8 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
         this._frameDashboardFlow = new Gtk.FlowBox({
             selection_mode: Gtk.SelectionMode.NONE,
             valign: Gtk.Align.START,
-            row_spacing: 14,
-            column_spacing: 14,
+            row_spacing: 16,
+            column_spacing: 16,
             homogeneous: false,
             max_children_per_line: 4,
         });
@@ -160,18 +147,24 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
 
         const settingsBox = new Gtk.Box({
             orientation: Gtk.Orientation.VERTICAL,
-            spacing: 16,
+            spacing: 14,
             hexpand: true,
             vexpand: true,
         });
+        settingsBox.add_css_class('image-frame-settings-panel');
 
         const settingsHeader = new Gtk.Box({
             orientation: Gtk.Orientation.HORIZONTAL,
-            spacing: 12,
+            spacing: 10,
             hexpand: true,
+            margin_bottom: 8,
         });
-        const settingsBack = Gtk.Button.new_from_icon_name('go-previous-symbolic');
-        settingsBack.add_css_class('flat');
+        settingsHeader.add_css_class('image-frame-settings-header');
+        const settingsBack = this._createActionButton(
+            _('Back to image frames'),
+            'go-previous-symbolic',
+            'image-frame-action-button image-frame-action-button-compact'
+        );
         settingsBack.set_tooltip_text(_('Back to image frames'));
         settingsBack.connect('clicked', () => this._showDashboard());
         this._settingsPageButton = settingsBack;
@@ -244,13 +237,7 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
         });
         frameGroup.add(this._visibleRow);
 
-        this._deleteFrameRow = new Adw.ActionRow({
-            title: _('Delete image frame'),
-            subtitle: _('Remove this frame. At least one frame must remain.'),
-        });
-        this._deleteFrameButton = Gtk.Button.new_from_icon_name('user-trash-symbolic');
-        this._deleteFrameButton.add_css_class('destructive-action');
-        this._deleteFrameButton.set_valign(Gtk.Align.CENTER);
+        this._deleteFrameButton = this._createActionButton(_('Delete selected frame'), 'user-trash-symbolic', 'image-frame-action-button destructive-action');
         this._deleteFrameButton.connect('clicked', () => {
             const idx = this._profiles.findIndex(p => p.id === this._activeProfileId);
             if (idx < 0 || this._profiles.length <= 1) return;
@@ -273,6 +260,7 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
                     dlg.destroy();
                     return;
                 }
+
                 this._profiles.splice(idx, 1);
                 this._activeProfileId = this._profiles[Math.max(0, idx - 1)].id;
                 this.settings.set_string('active-profile-id', this._activeProfileId);
@@ -284,8 +272,6 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
             });
             dialog.present();
         });
-        this._deleteFrameRow.add_suffix(this._deleteFrameButton);
-        this._deleteFrameRow.activatable_widget = this._deleteFrameButton;
 
         const imageGroup = new Adw.PreferencesGroup();
         imageGroup.set_title(_('Image Source'));
@@ -354,9 +340,22 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
         });
         imageGroup.add(this._currentInfoRow);
 
+        const actionsGroup = new Adw.PreferencesGroup();
+        actionsGroup.set_title(_('Actions'));
+        actionsGroup.set_description(
+            _('Use this button to remove the currently selected frame.')
+        );
+        const actionsBox = new Gtk.Box({
+            orientation: Gtk.Orientation.HORIZONTAL,
+            hexpand: true,
+            halign: Gtk.Align.FILL,
+        });
+        actionsBox.append(this._deleteFrameButton);
+        actionsGroup.add(actionsBox);
+
         settingsContent.append(frameGroup);
-        settingsContent.append(this._deleteFrameRow);
         settingsContent.append(imageGroup);
+        settingsContent.append(actionsGroup);
         settingsBox.append(settingsScroll);
         this._frameStack.add_named(settingsBox, 'settings');
 
@@ -467,7 +466,6 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
         } catch (error) {
             const message = `Unable to parse image frame settings: ${error}`;
             this._recordDeveloperError(message);
-            console.warn(message);
         }
         return [];
     }
@@ -535,10 +533,6 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
     _updateSettingRows() {
         const profile = this._getActiveProfile();
         if (!profile) {
-            if (this._frameTitleLabel)
-                this._frameTitleLabel.set_label(_('Image Frames'));
-            if (this._frameSubtitleLabel)
-                this._frameSubtitleLabel.set_label(_('Tap the add card to create frame 1.'));
             return;
         }
 
@@ -582,15 +576,8 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
     }
 
     _recordDeveloperError(message) {
-        this._lastDeveloperError = message || _('No developer errors recorded yet.');
-        if (this._developerErrorLabel)
-            this._developerErrorLabel.set_label(this._lastDeveloperError);
-    }
-
-    _showDeveloperPage() {
-        if (this._frameStack)
-            this._frameStack.set_visible_child_name('developer');
-        this._recordDeveloperError(this._lastDeveloperError);
+        if (message)
+            console.warn(message);
     }
 
     _getExtensionVersion() {
@@ -601,47 +588,131 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
     }
 
     _showAboutDialog(window) {
-        const dialog = new Adw.MessageDialog({
+        const dialog = new Gtk.Window({
+            title: _('About'),
             transient_for: window,
-            heading: _('Picture Desktop Widget Remake'),
-            body: _(
-                'Version %s\nSupports JPEG, PNG, GIF, BMP, and WebP images.\n\nMaintained by:\nMaximilian Rosenbaum\nElias-Leander Ahlers\n\nCredits:\nOriginal creator: GaszokS\nBased on Picture Desktop Widget.\n\nRecent: Added developer page and error capture'
-            ).format(this._getExtensionVersion()),
-            close_response: 'close',
+            modal: true,
+            resizable: false,
+            default_width: 520,
+            default_height: 260,
         });
-        dialog.add_response('close', _('_Close'));
-        dialog.add_response('dev-page', _('Developer page'));
-        dialog.add_response('buy-me-a-coffee', _('Buy Me a Coffee'));
-        dialog.set_default_response('close');
-        dialog.connect('response', (dlg, response) => {
-            if (response === 'dev-page') {
-                this._showDeveloperPage();
-                dlg.destroy();
-                return;
-            }
-            if (response === 'buy-me-a-coffee') {
-                this._openExternalUrl('https://buymeacoffee.com/MaximilianRosenbaum', window);
-                dlg.destroy();
-                return;
-            }
-            dlg.destroy();
+
+        const content = new Gtk.Box({
+            orientation: Gtk.Orientation.VERTICAL,
+            spacing: 14,
+            margin_top: 18,
+            margin_bottom: 18,
+            margin_start: 18,
+            margin_end: 18,
         });
+        const title = new Gtk.Label({
+            label: _('Picture Desktop Widget Remake'),
+            xalign: 0,
+            wrap: true,
+        });
+        title.add_css_class('title-2');
+        const subtitle = new Gtk.Label({
+            label: _('Version %s').format(this._getExtensionVersion()),
+            xalign: 0,
+            wrap: true,
+        });
+        subtitle.add_css_class('dim-label');
+        const credits = new Gtk.Label({
+            label: _(
+                'Maintained by: Maximilian Rosenbaum, Elias-Leander Ahlers\nOriginal creator: GaszokS (Picture Desktop Widget)'
+            ),
+            xalign: 0,
+            wrap: true,
+        });
+
+        const actions = new Gtk.Box({
+            orientation: Gtk.Orientation.HORIZONTAL,
+            spacing: 8,
+            halign: Gtk.Align.END,
+        });
+        const buyMeACoffeeButton = this._createActionButton(
+            _('Buy Me a Coffee'),
+            'emblem-favorite-symbolic',
+            'image-frame-action-button'
+        );
+        buyMeACoffeeButton.connect('clicked', () => {
+            this._openExternalUrl('https://buymeacoffee.com/MaximilianRosenbaum');
+        });
+
+        const detailsButton = this._createActionButton(
+            _('Details'),
+            'dialog-information-symbolic',
+            'image-frame-action-button'
+        );
+        detailsButton.connect('clicked', () => {
+            dialog.close();
+            this._showAboutDetails(window);
+        });
+
+        actions.append(buyMeACoffeeButton);
+        actions.append(detailsButton);
+        content.append(title);
+        content.append(subtitle);
+        content.append(credits);
+        content.append(actions);
+        dialog.set_child(content);
         dialog.present();
     }
 
-    _openExternalUrl(url, window) {
+    _showAboutDetails(window) {
+        const dialog = new Gtk.Window({
+            title: _('Details'),
+            transient_for: window,
+            modal: true,
+            default_width: 560,
+            default_height: 340,
+        });
+
+        const content = new Gtk.Box({
+            orientation: Gtk.Orientation.VERTICAL,
+            spacing: 12,
+            margin_top: 18,
+            margin_bottom: 18,
+            margin_start: 18,
+            margin_end: 18,
+        });
+        const detailsText = new Gtk.Label({
+            label: _(
+                '<b>Image Frames</b>\nCreate multiple desktop frames that display random images from your selected folders.\n\n<b>How to use</b>\nAdd a frame from the dashboard, open its settings, and configure folder, size, position, rounding, and refresh interval.\n\n<b>Supported formats</b>\nJPEG, PNG, GIF, BMP, WebP, SVG.'
+            ),
+            use_markup: true,
+            xalign: 0,
+            wrap: true,
+        });
+        const actions = new Gtk.Box({
+            orientation: Gtk.Orientation.HORIZONTAL,
+            spacing: 8,
+            halign: Gtk.Align.END,
+        });
+        const issueButton = this._createActionButton(
+            _('Report an Issue'),
+            'dialog-warning-symbolic',
+            'image-frame-action-button'
+        );
+        issueButton.connect('clicked', () => {
+            this._openExternalUrl('https://github.com/ZeysMockingjay/Picture-desktop-widget-remake/issues');
+        });
+        actions.append(issueButton);
+        content.append(detailsText);
+        content.append(actions);
+        dialog.set_child(content);
+        dialog.present();
+    }
+
+    _openExternalUrl(url) {
         try {
-            Gtk.show_uri(window, url, Gdk.CURRENT_TIME);
+            Gio.AppInfo.launch_default_for_uri(url, null);
         } catch (error) {
-            const message = `Unable to open URL ${url}: ${error}`;
-            this._recordDeveloperError(message);
-            console.warn(message);
+            this._recordDeveloperError(`Unable to open URL ${url}: ${error}`);
         }
     }
 
     _syncActiveFrameHeaders(profile) {
-        if (this._frameSubtitleLabel)
-            this._frameSubtitleLabel.set_label(_('Editing the selected frame.'));
         if (this._settingsHeaderTitle)
             this._settingsHeaderTitle.set_label(profile?.name || _('Image Frames'));
         if (this._settingsHeaderSubtitle)
@@ -720,21 +791,36 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
         this._frameCards = new Map();
 
         const addTile = this._buildFrameTile({ isAdd: true });
-        this._frameDashboardFlow.insert(addTile, -1);
+        {
+            const child = new Gtk.FlowBoxChild({
+                hexpand: false,
+                halign: Gtk.Align.CENTER,
+                width_request: FRAME_TILE_SIZE + (FRAME_TILE_PADDING * 2),
+                height_request: FRAME_TILE_SIZE + (FRAME_TILE_PADDING * 2),
+            });
+            child.set_child(addTile);
+            /* Ensure the FlowBoxChild cell exactly matches the visual tile
+             * size (tile size + internal padding). This avoids FlowBox cells
+             * being wider than the tile and creating a larger clickable area
+             * to the right of the visual button. */
+            this._frameDashboardFlow.insert(child, -1);
+        }
 
         for (const profile of this._profiles) {
             const tile = this._buildFrameTile({ profile, isActive: profile.id === this._activeProfileId });
             this._frameCards.set(profile.id, tile);
-            this._frameDashboardFlow.insert(tile, -1);
-        }
-
-        if (this._frameTitleLabel)
-            this._frameTitleLabel.set_label(_('Image Frames'));
-        if (this._frameSubtitleLabel) {
-            const count = this._profiles.length;
-            this._frameSubtitleLabel.set_label(
-                count === 0 ? _('Tap the add card to create frame 1.') : _('%d image frame%s ready to edit.').format(count, count === 1 ? '' : 's')
-            );
+            {
+                const child = new Gtk.FlowBoxChild({
+                    hexpand: false,
+                    halign: Gtk.Align.CENTER,
+                    width_request: FRAME_TILE_SIZE + (FRAME_TILE_PADDING * 2),
+                    height_request: FRAME_TILE_SIZE + (FRAME_TILE_PADDING * 2),
+                });
+                child.set_child(tile);
+                /* Force the FlowBoxChild to the exact tile footprint so the
+                 * interactive cell matches the visible button bounds. */
+                this._frameDashboardFlow.insert(child, -1);
+            }
         }
 
         this._syncFrameTileSelection();
@@ -748,12 +834,12 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
         const tile = new Gtk.Button({
             width_request: FRAME_TILE_SIZE,
             height_request: FRAME_TILE_SIZE,
-            halign: Gtk.Align.START,
-            valign: Gtk.Align.START,
+            halign: Gtk.Align.CENTER,
+            valign: Gtk.Align.CENTER,
             hexpand: false,
             vexpand: false,
         });
-        tile.add_css_class('card');
+        tile.set_has_frame(true);
         tile.add_css_class('frame-tile');
         if (isAdd)
             tile.add_css_class('suggested-action');
@@ -767,8 +853,9 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
             margin_bottom: FRAME_TILE_PADDING,
             margin_start: FRAME_TILE_PADDING,
             margin_end: FRAME_TILE_PADDING,
-            halign: Gtk.Align.FILL,
-            valign: Gtk.Align.FILL,
+            halign: Gtk.Align.CENTER,
+            valign: Gtk.Align.CENTER,
+            vexpand: false,
         });
         const icon = new Gtk.Image({
             icon_name: isAdd ? 'list-add-symbolic' : 'folder-pictures-symbolic',
@@ -839,11 +926,36 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
             return;
 
         this._frameTileStyleProvider = new Gtk.CssProvider();
-        this._frameTileStyleProvider.load_from_data(`
+        const css = `
             .frame-tile {
                 min-width: ${FRAME_TILE_SIZE}px;
                 min-height: ${FRAME_TILE_SIZE}px;
                 padding: 0;
+                border-radius: 12px;
+            }
+
+            .image-frame-action-button {
+                min-height: 32px;
+                border-radius: 12px;
+                padding: 4px 10px;
+                margin: 0;
+            }
+
+            .image-frame-action-button > box {
+                spacing: 6px;
+            }
+
+            .image-frame-action-button.image-frame-action-button-compact {
+                min-height: 28px;
+                padding: 2px 8px;
+            }
+
+            .image-frame-settings-panel {
+                padding: 2px 2px 6px 2px;
+            }
+
+            .image-frame-settings-header {
+                margin-bottom: 4px;
             }
 
             .frame-tile.frame-selected {
@@ -853,7 +965,11 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
             .frame-tile.frame-selected:hover {
                 box-shadow: inset 0 0 0 2px @accent_bg_color;
             }
-        `);
+        `;
+        if (this._frameTileStyleProvider.load_from_data.length >= 2)
+            this._frameTileStyleProvider.load_from_data(css, css.length);
+        else
+            this._frameTileStyleProvider.load_from_data(css);
 
         const display = Gdk.Display.get_default();
         if (display) {
@@ -935,11 +1051,11 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
         });
         row.set_subtitle(getter() || '');
 
-        const button = new Gtk.Button({
-            label: _('Choose Folder'),
-            halign: Gtk.Align.END,
-            valign: Gtk.Align.CENTER,
-        });
+        const button = this._createActionButton(
+            _('Choose Folder'),
+            'folder-open-symbolic',
+            'image-frame-action-button'
+        );
         button.connect('clicked', () => {
             const dialog = new Gtk.FileChooserDialog({
                 title: _('Select Image Folder'),
@@ -983,15 +1099,21 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
                     } catch (error) {
                         const message = `Unable to count images in selected folder: ${error}`;
                         this._recordDeveloperError(message);
-                        console.warn(message);
                     }
                 }
                 dlg.destroy();
             });
             dialog.present();
         });
-        row.add_suffix(button);
-        row.activatable_widget = button;
+        const suffixBox = new Gtk.Box({
+            orientation: Gtk.Orientation.HORIZONTAL,
+            spacing: 0,
+            hexpand: false,
+            halign: Gtk.Align.END,
+            valign: Gtk.Align.CENTER,
+        });
+        suffixBox.append(button);
+        row.add_suffix(suffixBox);
         return row;
     }
 }
