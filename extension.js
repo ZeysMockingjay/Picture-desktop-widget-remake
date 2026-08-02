@@ -25,11 +25,9 @@ export default class PictureDesktopWidgetExtension extends Extension {
     enable() {
         this.settings = this.getSettings();
         this._dirMonitors = new Map();
-        this._dirMonitorSignalIds = new Map();
         this._profiles = this._normalizeProfiles(this._loadProfiles());
         this._widgetByProfileId = new Map();
         this._timeoutIds = new Map();
-        this._settingsChangedIds = [];
         this._reloadingProfiles = false;
 
         if (this._profiles.length === 0) {
@@ -52,9 +50,12 @@ export default class PictureDesktopWidgetExtension extends Extension {
             this._reloadingProfiles = false;
         }
 
-        this._settingsChangedIds.push(
-            this.settings.connect('changed::widget-profiles', this._reloadProfiles),
-            this.settings.connect('changed::active-profile-id', this._reloadProfiles)
+        this.settings.connectObject(
+            'changed::widget-profiles',
+            this._reloadProfiles,
+            'changed::active-profile-id',
+            this._reloadProfiles,
+            this
         );
     }
 
@@ -68,12 +69,8 @@ export default class PictureDesktopWidgetExtension extends Extension {
         }
         this._timeoutIds.clear();
 
-        if (this._settingsChangedIds && this.settings) {
-            for (const id of this._settingsChangedIds) {
-                this.settings.disconnect(id);
-            }
-            this._settingsChangedIds = [];
-        }
+        if (this.settings)
+            this.settings.disconnectObject(this);
 
         for (const widget of this._widgetByProfileId.values()) {
             if (widget) {
@@ -87,7 +84,6 @@ export default class PictureDesktopWidgetExtension extends Extension {
                 this._removeDirMonitor(profileId);
             }
             this._dirMonitors.clear();
-            this._dirMonitorSignalIds?.clear();
         }
         this._profiles = [];
         this.settings = null;
@@ -109,14 +105,13 @@ export default class PictureDesktopWidgetExtension extends Extension {
 
             const file = Gio.File.new_for_path(profile.imagePath);
             const monitor = file.monitor_directory(Gio.FileMonitorFlags.NONE, null);
-            const signalId = monitor.connect('changed', () => {
+            monitor.connectObject('changed', () => {
                 profile.requiresRescan = true;
                 // Trigger an immediate refresh cycle for this profile
                 this._refreshProfile(profile, false);
                 this._scheduleProfileRefresh(profile);
-            });
+            }, this);
             this._dirMonitors.set(profile.id, monitor);
-            this._dirMonitorSignalIds.set(profile.id, signalId);
         } catch (error) {
             console.warn(`Failed to install monitor for ${profile.imagePath}: ${error}`);
         }
@@ -128,28 +123,16 @@ export default class PictureDesktopWidgetExtension extends Extension {
             return;
         const monitor = this._dirMonitors.get(profileId);
         if (monitor) {
-            const signalId = this._dirMonitorSignalIds?.get(profileId) || 0;
-            this._disconnectAndCancelMonitor(monitor, signalId);
-            this._dirMonitorSignalIds?.delete(profileId);
+            this._disconnectAndCancelMonitor(monitor);
             this._dirMonitors.delete(profileId);
         }
     }
 
-    _disconnectAndCancelMonitor(monitor, signalId) {
+    _disconnectAndCancelMonitor(monitor) {
         if (!monitor)
             return;
-        if (signalId) {
-            try {
-                monitor.disconnect(signalId);
-            } catch (error) {
-                console.warn(`Failed to disconnect file monitor signal: ${error}`);
-            }
-        }
-        try {
-            monitor.cancel();
-        } catch (error) {
-            console.warn(`Failed to cancel file monitor: ${error}`);
-        }
+        monitor.disconnectObject(this);
+        monitor.cancel();
     }
 
     _createDefaultProfile() {
