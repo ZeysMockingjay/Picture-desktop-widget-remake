@@ -28,9 +28,7 @@ Credits:
 
 ## Installation
 
-The extension will be available from the GNOME Extensions website soon.
-
-[![GNOME Extensions](docs/gnome-extensions_logo.svg)](https://extensions.gnome.org/extension/10581/picture-desktop-widget-remake/)
+[<img src="docs/gnome-extensions_logo.svg" alt="GNOME Extensions" width="220">](https://extensions.gnome.org/extension/10581/picture-desktop-widget-remake/)
 
 ## Support the project
 
