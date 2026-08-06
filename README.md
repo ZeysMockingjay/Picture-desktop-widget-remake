@@ -28,11 +28,11 @@ Credits:
 
 ## Installation
 
-[<img src="docs/gnome-extensions_logo.svg" alt="GNOME Extensions" width="220">](https://extensions.gnome.org/extension/10581/picture-desktop-widget-remake/)
+[<img src="docs/gnome-extensions_logo.svg" alt="GNOME Extensions" width="320">](https://extensions.gnome.org/extension/10581/picture-desktop-widget-remake/)
 
 ## Support the project
 
-- Buy Me a Coffee: https://buymeacoffee.com/MaximilianRosenbaum
+[<img src="docs/Buy-me-a-coffee.svg" alt="Buy Me a Coffee" width="220">](https://buymeacoffee.com/MaximilianRosenbaum)
 
 ## Contributing
 
