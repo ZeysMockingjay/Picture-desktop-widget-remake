@@ -32,10 +32,6 @@ The extension will be available from the GNOME Extensions website soon.
 
 - GNOME Extensions page: https://extensions.gnome.org/extension/10581/picture-desktop-widget-remake/
 
-For local installs, the extension folder name must match the UUID from [metadata.json](/home/max/.local/share/gnome-shell/extensions/picture-desktop-widget-remake/metadata.json):
-
-- `~/.local/share/gnome-shell/extensions/picture-desktop-remake@ZeysMockingjay.Github.com/`
-
 ## Support the project
 
 - Buy Me a Coffee: https://buymeacoffee.com/MaximilianRosenbaum
