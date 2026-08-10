@@ -28,7 +28,7 @@ Credits:
 
 ## Installation
 
-[<img src="docs/gnome-extensions_logo.svg" alt="GNOME Extensions" width="320">](https://extensions.gnome.org/extension/10581/picture-desktop-widget-remake/)
+[<img src="docs/gnome-extensions_logo.svg" alt="GNOME Extensions" width="320">](https://extensions.gnome.org/extension/10608/picture-desktop-widget-remake/)
 
 ## Support the project
 
