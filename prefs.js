@@ -41,12 +41,13 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
     }
 
     fillPreferencesWindow(window) {
-        this.settings = this.getSettings();
-        window.set_title(_('Picture Desktop Widget Remake'));
-        window.set_default_size(780, 700);
-        this._profiles = this._normalizeProfiles(this._loadProfiles());
-        this._activeProfileId = this.settings.get_string('active-profile-id') ||
-                                this._profiles[0]?.id || '';
+        try {
+            this.settings = this.getSettings();
+            window.set_title(_('Picture Desktop Widget Remake'));
+            window.set_default_size(780, 700);
+            this._profiles = this._normalizeProfiles(this._loadProfiles());
+            this._activeProfileId = this.settings.get_string('active-profile-id') ||
+                                    this._profiles[0]?.id || '';
 
         if (!this._profiles.some(p => p.id === this._activeProfileId))
             this._activeProfileId = this._profiles[0]?.id || '';
@@ -133,6 +134,13 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
             vexpand: true,
             hscrollbar_policy: Gtk.PolicyType.NEVER,
         });
+        const dashboardContent = new Gtk.Box({
+            orientation: Gtk.Orientation.VERTICAL,
+            margin_top: 6,
+            margin_bottom: 18,
+            margin_start: 6,
+            margin_end: 12,
+        });
         this._frameDashboardFlow = new Gtk.FlowBox({
             selection_mode: Gtk.SelectionMode.NONE,
             valign: Gtk.Align.START,
@@ -141,7 +149,8 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
             homogeneous: false,
             max_children_per_line: 4,
         });
-        dashboardScroll.set_child(this._frameDashboardFlow);
+        dashboardContent.append(this._frameDashboardFlow);
+        dashboardScroll.set_child(dashboardContent);
         dashboardBox.append(dashboardScroll);
         this._frameStack.add_named(dashboardBox, 'dashboard');
 
@@ -159,7 +168,6 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
             hexpand: true,
             margin_bottom: 8,
         });
-        settingsHeader.add_css_class('image-frame-settings-header');
         const settingsBack = this._createActionButton(
             _('Back to image frames'),
             'go-previous-symbolic',
@@ -202,6 +210,10 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
             spacing: 18,
             hexpand: true,
             vexpand: true,
+            margin_top: 6,
+            margin_bottom: 18,
+            margin_start: 6,
+            margin_end: 12,
         });
         settingsScroll.set_child(settingsContent);
 
@@ -370,6 +382,12 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
 
         // Initial sync
         this._updateSettingRows();
+        } catch (error) {
+            this._recordDeveloperError(
+                `Unable to initialize extension preferences: ${error}`
+            );
+            this._showPreferencesError(window);
+        }
     }
 
     /**
@@ -580,6 +598,24 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
             console.warn(message);
     }
 
+    _showPreferencesError(window) {
+        const group = new Adw.PreferencesGroup({
+            title: _('Extension Error'),
+            description: _(
+                'The preferences UI could not be loaded completely. Please close and reopen preferences.'
+            ),
+        });
+        const row = new Adw.ActionRow({
+            title: _('Check logs for details'),
+            subtitle: _('Run gnome-extensions-app from a terminal to view the stack trace.'),
+            activatable: false,
+        });
+        group.add(row);
+        const page = new Adw.PreferencesPage();
+        page.add(group);
+        window.set_content(page);
+    }
+
     _getExtensionVersion() {
         const version = this.metadata?.version;
         if (version !== undefined && version !== null && version !== '')
@@ -588,128 +624,22 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
     }
 
     _showAboutDialog(window) {
-        const dialog = new Gtk.Window({
-            title: _('About'),
+        const dialog = new Gtk.AboutDialog({
             transient_for: window,
             modal: true,
-            resizable: false,
-            default_width: 520,
-            default_height: 260,
-        });
-
-        const content = new Gtk.Box({
-            orientation: Gtk.Orientation.VERTICAL,
-            spacing: 14,
-            margin_top: 18,
-            margin_bottom: 18,
-            margin_start: 18,
-            margin_end: 18,
-        });
-        const title = new Gtk.Label({
-            label: _('Picture Desktop Widget Remake'),
-            xalign: 0,
-            wrap: true,
-        });
-        title.add_css_class('title-2');
-        const subtitle = new Gtk.Label({
-            label: _('Version %s').format(this._getExtensionVersion()),
-            xalign: 0,
-            wrap: true,
-        });
-        subtitle.add_css_class('dim-label');
-        const credits = new Gtk.Label({
-            label: _(
-                'Maintained by: Maximilian Rosenbaum, Elias-Leander Ahlers\nOriginal creator: GaszokS (Picture Desktop Widget)'
+            program_name: _('Picture Desktop Widget Remake'),
+            version: this._getExtensionVersion(),
+            comments: _(
+                'Create multiple desktop image widgets with configurable folders, size, position, rounding, and refresh interval.'
             ),
-            xalign: 0,
-            wrap: true,
+            website: 'https://github.com/ZeysMockingjay/Picture-desktop-widget-remake',
+            website_label: _('Project Website'),
+            authors: ['Maximilian Rosenbaum', 'Elias-Leander Ahlers'],
+            copyright: '© Maximilian Rosenbaum',
+            license_type: Gtk.License.GPL_3_0,
         });
-
-        const actions = new Gtk.Box({
-            orientation: Gtk.Orientation.HORIZONTAL,
-            spacing: 8,
-            halign: Gtk.Align.END,
-        });
-        const buyMeACoffeeButton = this._createActionButton(
-            _('Buy Me a Coffee'),
-            'emblem-favorite-symbolic',
-            'image-frame-action-button'
-        );
-        buyMeACoffeeButton.connect('clicked', () => {
-            this._openExternalUrl('https://buymeacoffee.com/MaximilianRosenbaum');
-        });
-
-        const detailsButton = this._createActionButton(
-            _('Details'),
-            'dialog-information-symbolic',
-            'image-frame-action-button'
-        );
-        detailsButton.connect('clicked', () => {
-            dialog.close();
-            this._showAboutDetails(window);
-        });
-
-        actions.append(buyMeACoffeeButton);
-        actions.append(detailsButton);
-        content.append(title);
-        content.append(subtitle);
-        content.append(credits);
-        content.append(actions);
-        dialog.set_child(content);
+        dialog.set_translator_credits(_('translator-credits'));
         dialog.present();
-    }
-
-    _showAboutDetails(window) {
-        const dialog = new Gtk.Window({
-            title: _('Details'),
-            transient_for: window,
-            modal: true,
-            default_width: 560,
-            default_height: 340,
-        });
-
-        const content = new Gtk.Box({
-            orientation: Gtk.Orientation.VERTICAL,
-            spacing: 12,
-            margin_top: 18,
-            margin_bottom: 18,
-            margin_start: 18,
-            margin_end: 18,
-        });
-        const detailsText = new Gtk.Label({
-            label: _(
-                '<b>Image Frames</b>\nCreate multiple desktop frames that display random images from your selected folders.\n\n<b>How to use</b>\nAdd a frame from the dashboard, open its settings, and configure folder, size, position, rounding, and refresh interval.\n\n<b>Supported formats</b>\nJPEG, PNG, GIF, BMP, WebP, SVG.'
-            ),
-            use_markup: true,
-            xalign: 0,
-            wrap: true,
-        });
-        const actions = new Gtk.Box({
-            orientation: Gtk.Orientation.HORIZONTAL,
-            spacing: 8,
-            halign: Gtk.Align.END,
-        });
-        const issueButton = this._createActionButton(
-            _('Report an Issue'),
-            'dialog-warning-symbolic',
-            'image-frame-action-button'
-        );
-        issueButton.connect('clicked', () => {
-            this._openExternalUrl('https://github.com/ZeysMockingjay/Picture-desktop-widget-remake/issues');
-        });
-        actions.append(issueButton);
-        content.append(detailsText);
-        content.append(actions);
-        dialog.set_child(content);
-        dialog.present();
-    }
-
-    _openExternalUrl(url) {
-        try {
-            Gio.AppInfo.launch_default_for_uri(url, null);
-        } catch (error) {
-            this._recordDeveloperError(`Unable to open URL ${url}: ${error}`);
-        }
     }
 
     _syncActiveFrameHeaders(profile) {
@@ -951,11 +881,7 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
             }
 
             .image-frame-settings-panel {
-                padding: 2px 2px 6px 2px;
-            }
-
-            .image-frame-settings-header {
-                margin-bottom: 4px;
+                padding: 0;
             }
 
             .frame-tile.frame-selected {
