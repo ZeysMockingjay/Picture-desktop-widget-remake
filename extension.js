@@ -25,6 +25,7 @@ export default class PictureDesktopWidgetExtension extends Extension {
     enable() {
         this.settings = this.getSettings();
         this._dirMonitors = new Map();
+        this._monitorDebounceIds = new Map();
         this._profiles = this._normalizeProfiles(this._loadProfiles());
         this._widgetByProfileId = new Map();
         this._timeoutIds = new Map();
@@ -68,6 +69,12 @@ export default class PictureDesktopWidgetExtension extends Extension {
             }
         }
         this._timeoutIds.clear();
+        for (const [id, timeoutId] of this._monitorDebounceIds) {
+            if (timeoutId) {
+                GLib.Source.remove(timeoutId);
+            }
+        }
+        this._monitorDebounceIds.clear();
 
         if (this.settings)
             this.settings.disconnectObject(this);
@@ -106,10 +113,7 @@ export default class PictureDesktopWidgetExtension extends Extension {
             const file = Gio.File.new_for_path(profile.imagePath);
             const monitor = file.monitor_directory(Gio.FileMonitorFlags.NONE, null);
             monitor.connectObject('changed', () => {
-                profile.requiresRescan = true;
-                // Trigger an immediate refresh cycle for this profile
-                this._refreshProfile(profile, false);
-                this._scheduleProfileRefresh(profile);
+                this._queueMonitorTriggeredRefresh(profile);
             }, this);
             this._dirMonitors.set(profile.id, monitor);
         } catch (error) {
@@ -126,6 +130,11 @@ export default class PictureDesktopWidgetExtension extends Extension {
             this._disconnectAndCancelMonitor(monitor);
             this._dirMonitors.delete(profileId);
         }
+        const debounceTimeoutId = this._monitorDebounceIds.get(profileId);
+        if (debounceTimeoutId) {
+            GLib.Source.remove(debounceTimeoutId);
+            this._monitorDebounceIds.delete(profileId);
+        }
     }
 
     _disconnectAndCancelMonitor(monitor) {
@@ -133,6 +142,31 @@ export default class PictureDesktopWidgetExtension extends Extension {
             return;
         monitor.disconnectObject(this);
         monitor.cancel();
+    }
+
+    _queueMonitorTriggeredRefresh(profile) {
+        if (!profile)
+            return;
+
+        const profileId = profile.id;
+        const existingTimeoutId = this._monitorDebounceIds.get(profileId);
+        if (existingTimeoutId) {
+            GLib.Source.remove(existingTimeoutId);
+            this._monitorDebounceIds.delete(profileId);
+        }
+
+        const timeoutId = GLib.timeout_add_seconds(
+            GLib.PRIORITY_DEFAULT,
+            1,
+            () => {
+                this._monitorDebounceIds.delete(profileId);
+                profile.requiresRescan = true;
+                this._refreshProfile(profile, false);
+                this._scheduleProfileRefresh(profile);
+                return GLib.SOURCE_REMOVE;
+            }
+        );
+        this._monitorDebounceIds.set(profileId, timeoutId);
     }
 
     _createDefaultProfile() {
