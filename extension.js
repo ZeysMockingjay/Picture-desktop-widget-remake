@@ -4,6 +4,11 @@ import Gio from 'gi://Gio';
 import Clutter from 'gi://Clutter';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import { Extension, gettext as _ } from 'resource:///org/gnome/shell/extensions/extension.js';
+import {
+    createDefaultProfile,
+    normalizeProfiles,
+    toPersistedProfile,
+} from './profile-utils.js';
 
 /**
  * Picture Desktop Widget extension
@@ -17,7 +22,8 @@ import { Extension, gettext as _ } from 'resource:///org/gnome/shell/extensions/
  */
 // Scanning limits to avoid blocking on extremely large folders
 const MAX_SCAN_DEPTH = 6;
-const MAX_SCAN_FILES = 20000;
+const MAX_SCAN_FILES = 5000;
+const MAX_SCAN_DURATION_MS = 150;
 const SKIP_DOT_DIRS = true;
 const SUPPORTED_IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg'];
 
@@ -25,13 +31,14 @@ export default class PictureDesktopWidgetExtension extends Extension {
     enable() {
         this.settings = this.getSettings();
         this._dirMonitors = new Map();
-        this._profiles = this._normalizeProfiles(this._loadProfiles());
+        this._monitorDebounceIds = new Map();
+        this._profiles = this._loadProfiles();
         this._widgetByProfileId = new Map();
         this._timeoutIds = new Map();
         this._reloadingProfiles = false;
 
         if (this._profiles.length === 0) {
-            this._profiles = [this._createDefaultProfile()];
+            this._profiles = [createDefaultProfile(_('Default widget'))];
         }
 
         // Create all widgets and start their timers BEFORE saving, to prevent
@@ -68,6 +75,12 @@ export default class PictureDesktopWidgetExtension extends Extension {
             }
         }
         this._timeoutIds.clear();
+        for (const [id, timeoutId] of this._monitorDebounceIds) {
+            if (timeoutId) {
+                GLib.Source.remove(timeoutId);
+            }
+        }
+        this._monitorDebounceIds.clear();
 
         if (this.settings)
             this.settings.disconnectObject(this);
@@ -105,11 +118,9 @@ export default class PictureDesktopWidgetExtension extends Extension {
 
             const file = Gio.File.new_for_path(profile.imagePath);
             const monitor = file.monitor_directory(Gio.FileMonitorFlags.NONE, null);
+            monitor.set_rate_limit(1000);
             monitor.connectObject('changed', () => {
-                profile.requiresRescan = true;
-                // Trigger an immediate refresh cycle for this profile
-                this._refreshProfile(profile, false);
-                this._scheduleProfileRefresh(profile);
+                this._queueMonitorTriggeredRefresh(profile);
             }, this);
             this._dirMonitors.set(profile.id, monitor);
         } catch (error) {
@@ -126,6 +137,11 @@ export default class PictureDesktopWidgetExtension extends Extension {
             this._disconnectAndCancelMonitor(monitor);
             this._dirMonitors.delete(profileId);
         }
+        const debounceTimeoutId = this._monitorDebounceIds.get(profileId);
+        if (debounceTimeoutId) {
+            GLib.Source.remove(debounceTimeoutId);
+            this._monitorDebounceIds.delete(profileId);
+        }
     }
 
     _disconnectAndCancelMonitor(monitor) {
@@ -135,96 +151,29 @@ export default class PictureDesktopWidgetExtension extends Extension {
         monitor.cancel();
     }
 
-    _createDefaultProfile() {
-        // Create a sane default profile used when none are configured.
-        return this._normalizeProfile({
-            id: `profile-${Math.random().toString(36).slice(2, 10)}`,
-            name: 'Default widget',
-            imagePath: '',
-            widgetSize: 200,
-            widgetPositionX: 100,
-            widgetPositionY: 100,
-            widgetAspectRatio: 1.0,
-            widgetTimeout: 60,
-            widgetCornerRadius: 20,
-            timeLastUpdate: 0,
-            currentImagePath: '',
-            cachedFiles: [],
-            cachedFolderPath: '',
-            visible: true,
-            requiresRescan: true,
-        });
-    }
+    _queueMonitorTriggeredRefresh(profile) {
+        if (!profile)
+            return;
 
-    _normalizeProfile(profile = {}, fallback = {}) {
-        // Normalize profile values providing fallback defaults and type coercion.
-        const profileVisible = profile.visible;
-        const fallbackVisible = fallback.visible;
+        const profileId = profile.id;
+        const existingTimeoutId = this._monitorDebounceIds.get(profileId);
+        if (existingTimeoutId) {
+            GLib.Source.remove(existingTimeoutId);
+            this._monitorDebounceIds.delete(profileId);
+        }
 
-        const normalized = {
-            id: profile.id ||
-                 fallback.id ||
-                 `profile-${Math.random().toString(36).slice(2, 10)}`,
-            name: profile.name || fallback.name || _('Default widget'),
-            imagePath: profile.imagePath ?? fallback.imagePath ?? '',
-            widgetSize: Number.isFinite(Number(profile.widgetSize))
-                ? Number(profile.widgetSize)
-                : (Number.isFinite(Number(fallback.widgetSize))
-                    ? Number(fallback.widgetSize)
-                    : 200),
-            widgetPositionX: Number.isFinite(Number(profile.widgetPositionX))
-                ? Number(profile.widgetPositionX)
-                : (Number.isFinite(Number(fallback.widgetPositionX))
-                    ? Number(fallback.widgetPositionX)
-                    : 100),
-            widgetPositionY: Number.isFinite(Number(profile.widgetPositionY))
-                ? Number(profile.widgetPositionY)
-                : (Number.isFinite(Number(fallback.widgetPositionY))
-                    ? Number(fallback.widgetPositionY)
-                    : 100),
-            widgetAspectRatio: Number.isFinite(Number(profile.widgetAspectRatio))
-                ? Number(profile.widgetAspectRatio)
-                : (Number.isFinite(Number(fallback.widgetAspectRatio))
-                    ? Number(fallback.widgetAspectRatio)
-                    : 1.0),
-            widgetTimeout: Number.isFinite(Number(profile.widgetTimeout))
-                ? Number(profile.widgetTimeout)
-                : (Number.isFinite(Number(fallback.widgetTimeout))
-                    ? Number(fallback.widgetTimeout)
-                    : 60),
-            widgetCornerRadius: Number.isFinite(Number(profile.widgetCornerRadius))
-                ? Number(profile.widgetCornerRadius)
-                : (Number.isFinite(Number(fallback.widgetCornerRadius))
-                    ? Number(fallback.widgetCornerRadius)
-                    : 20),
-            timeLastUpdate: Number.isFinite(Number(profile.timeLastUpdate))
-                ? Number(profile.timeLastUpdate)
-                : (Number.isFinite(Number(fallback.timeLastUpdate))
-                    ? Number(fallback.timeLastUpdate)
-                    : 0),
-            currentImagePath: profile.currentImagePath ?? fallback.currentImagePath ?? '',
-            cachedFiles: Array.isArray(profile.cachedFiles)
-                ? profile.cachedFiles
-                : (Array.isArray(fallback.cachedFiles) ? fallback.cachedFiles : []),
-            cachedFolderPath: profile.cachedFolderPath ?? fallback.cachedFolderPath ?? '',
-            visible: profileVisible === undefined
-                ? fallbackVisible !== false
-                : profileVisible !== false,
-            requiresRescan: profile.requiresRescan === true ||
-                            fallback.requiresRescan === true ||
-                            (profile.requiresRescan === undefined &&
-                             fallback.requiresRescan === undefined),
-        };
-
-        if (normalized.widgetSize < 20) normalized.widgetSize = 20;
-        if (normalized.widgetTimeout < 5) normalized.widgetTimeout = 5;
-        if (normalized.widgetCornerRadius < 0) normalized.widgetCornerRadius = 0;
-        return normalized;
-    }
-
-    _normalizeProfiles(profiles) {
-        if (!Array.isArray(profiles)) return [];
-        return profiles.map(p => this._normalizeProfile(p));
+        const timeoutId = GLib.timeout_add_seconds(
+            GLib.PRIORITY_DEFAULT,
+            1,
+            () => {
+                this._monitorDebounceIds.delete(profileId);
+                profile.requiresRescan = true;
+                this._refreshProfile(profile, false);
+                this._scheduleProfileRefresh(profile);
+                return GLib.SOURCE_REMOVE;
+            }
+        );
+        this._monitorDebounceIds.set(profileId, timeoutId);
     }
 
     _loadProfiles() {
@@ -234,7 +183,7 @@ export default class PictureDesktopWidgetExtension extends Extension {
             const raw = this.settings.get_string('widget-profiles');
             const parsed = JSON.parse(raw);
             if (Array.isArray(parsed)) {
-                return parsed;
+                return normalizeProfiles(parsed, _('Default widget'));
             }
         } catch (error) {
             console.warn(`Unable to parse widget profiles: ${error}`);
@@ -244,8 +193,9 @@ export default class PictureDesktopWidgetExtension extends Extension {
 
     _saveProfiles(profiles = this._profiles) {
         if (!this.settings) return;
-        // Clone to avoid mutating in-memory profiles with normalization artifacts
-        const toSave = this._normalizeProfiles(profiles.map(p => ({ ...p })));
+        const toSave = profiles.map(profile =>
+            toPersistedProfile(profile, _('Default widget'))
+        );
         this.settings.set_string('widget-profiles', JSON.stringify(toSave));
         if (!this.settings.get_string('active-profile-id') && toSave[0]) {
             this.settings.set_string('active-profile-id', toSave[0].id);
@@ -339,6 +289,17 @@ export default class PictureDesktopWidgetExtension extends Extension {
             return;
         }
 
+        if (!Gio.File.new_for_path(folderPath).query_exists(null)) {
+            profile.currentImagePath = '';
+            profile.timeLastUpdate = 0;
+            profile.cachedFiles = [];
+            profile.cachedFolderPath = '';
+            profile.requiresRescan = true;
+            profile._statusMessage = _('Folder not found');
+            this._updateWidgetAppearance(widget, profile);
+            return;
+        }
+
         let fileNames = profile.cachedFiles || [];
         const shouldRescan = force ||
             profile.requiresRescan ||
@@ -350,13 +311,6 @@ export default class PictureDesktopWidgetExtension extends Extension {
             profile.cachedFiles = fileNames;
             profile.cachedFolderPath = folderPath;
             profile.requiresRescan = false;
-        }
-
-        if (!Gio.File.new_for_path(folderPath).query_exists(null)) {
-            profile.currentImagePath = '';
-            profile._statusMessage = _('Folder not found');
-            this._updateWidgetAppearance(widget, profile);
-            return;
         }
 
         if (fileNames.length === 0) {
@@ -381,8 +335,11 @@ export default class PictureDesktopWidgetExtension extends Extension {
 
         // Depth-first directory scan with limits to avoid long blocking ops.
         // Returns relative paths (from folderPath) of matching image files.
+        const scanStartTime = Date.now();
+
         const scanDirectory = (directory, relativeBase = '', depth = 0) => {
             if (depth >= MAX_SCAN_DEPTH) return;
+            if (Date.now() - scanStartTime >= MAX_SCAN_DURATION_MS) return;
             try {
                 const enumerator = directory.enumerate_children(
                     'standard::name,standard::type',
@@ -391,7 +348,9 @@ export default class PictureDesktopWidgetExtension extends Extension {
                 );
                 let info;
                 while ((info = enumerator.next_file(null)) !== null) {
-                    if (fileNames.length >= MAX_SCAN_FILES) break;
+                    if (fileNames.length >= MAX_SCAN_FILES ||
+                        Date.now() - scanStartTime >= MAX_SCAN_DURATION_MS)
+                        break;
                     const childName = info.get_name();
                     // Skip dot-directories like .cache or .git
                     if (SKIP_DOT_DIRS && childName.startsWith('.')) {
@@ -419,7 +378,7 @@ export default class PictureDesktopWidgetExtension extends Extension {
         };
 
         scanDirectory(folder);
-        return fileNames.sort();
+        return fileNames;
     }
 
     _updateWidgetAppearance(widget, profile) {
@@ -506,7 +465,9 @@ export default class PictureDesktopWidgetExtension extends Extension {
         this._reloadingProfiles = true;
 
         try {
-            const incoming = this._normalizeProfiles(this._loadProfiles());
+            let incoming = this._loadProfiles();
+            if (incoming.length === 0)
+                incoming = [createDefaultProfile(_('Default widget'))];
             const incomingIds = new Set(incoming.map(p => p.id));
             const existingIds = new Set(this._profiles.map(p => p.id));
 
