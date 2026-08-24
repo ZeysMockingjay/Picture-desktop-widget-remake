@@ -377,6 +377,7 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
 
         window.connect('close-request', () => {
             this._flushQueuedProfileSave();
+            this._removeFrameTileStyles();
             this.settings = null;
         });
 
@@ -488,10 +489,24 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
         return [];
     }
 
+    _toPersistedProfile(profile = {}) {
+        const normalized = this._normalizeProfile(profile);
+        return {
+            id: normalized.id,
+            name: normalized.name,
+            imagePath: normalized.imagePath,
+            widgetSize: normalized.widgetSize,
+            widgetPositionX: normalized.widgetPositionX,
+            widgetPositionY: normalized.widgetPositionY,
+            widgetAspectRatio: normalized.widgetAspectRatio,
+            widgetTimeout: normalized.widgetTimeout,
+            widgetCornerRadius: normalized.widgetCornerRadius,
+            visible: normalized.visible !== false,
+        };
+    }
+
     _saveProfiles() {
-        const toSave = this._normalizeProfiles(
-            this._profiles.map(p => ({ ...p }))
-        );
+        const toSave = this._profiles.map(profile => this._toPersistedProfile(profile));
         this.settings.set_string('widget-profiles', JSON.stringify(toSave));
     }
 
@@ -905,6 +920,19 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
                 Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
             );
         }
+    }
+
+    _removeFrameTileStyles() {
+        if (!this._frameTileStyleProvider)
+            return;
+        const display = Gdk.Display.get_default();
+        if (display) {
+            Gtk.StyleContext.remove_provider_for_display(
+                display,
+                this._frameTileStyleProvider
+            );
+        }
+        this._frameTileStyleProvider = null;
     }
 
     // -----------------------------------------------------------------------

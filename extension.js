@@ -112,6 +112,7 @@ export default class PictureDesktopWidgetExtension extends Extension {
 
             const file = Gio.File.new_for_path(profile.imagePath);
             const monitor = file.monitor_directory(Gio.FileMonitorFlags.NONE, null);
+            monitor.set_rate_limit(1000);
             monitor.connectObject('changed', () => {
                 this._queueMonitorTriggeredRefresh(profile);
             }, this);
@@ -276,10 +277,25 @@ export default class PictureDesktopWidgetExtension extends Extension {
         return [];
     }
 
+    _toPersistedProfile(profile = {}) {
+        const normalized = this._normalizeProfile(profile);
+        return {
+            id: normalized.id,
+            name: normalized.name,
+            imagePath: normalized.imagePath,
+            widgetSize: normalized.widgetSize,
+            widgetPositionX: normalized.widgetPositionX,
+            widgetPositionY: normalized.widgetPositionY,
+            widgetAspectRatio: normalized.widgetAspectRatio,
+            widgetTimeout: normalized.widgetTimeout,
+            widgetCornerRadius: normalized.widgetCornerRadius,
+            visible: normalized.visible !== false,
+        };
+    }
+
     _saveProfiles(profiles = this._profiles) {
         if (!this.settings) return;
-        // Clone to avoid mutating in-memory profiles with normalization artifacts
-        const toSave = this._normalizeProfiles(profiles.map(p => ({ ...p })));
+        const toSave = profiles.map(profile => this._toPersistedProfile(profile));
         this.settings.set_string('widget-profiles', JSON.stringify(toSave));
         if (!this.settings.get_string('active-profile-id') && toSave[0]) {
             this.settings.set_string('active-profile-id', toSave[0].id);
@@ -373,6 +389,17 @@ export default class PictureDesktopWidgetExtension extends Extension {
             return;
         }
 
+        if (!Gio.File.new_for_path(folderPath).query_exists(null)) {
+            profile.currentImagePath = '';
+            profile.timeLastUpdate = 0;
+            profile.cachedFiles = [];
+            profile.cachedFolderPath = '';
+            profile.requiresRescan = true;
+            profile._statusMessage = _('Folder not found');
+            this._updateWidgetAppearance(widget, profile);
+            return;
+        }
+
         let fileNames = profile.cachedFiles || [];
         const shouldRescan = force ||
             profile.requiresRescan ||
@@ -384,13 +411,6 @@ export default class PictureDesktopWidgetExtension extends Extension {
             profile.cachedFiles = fileNames;
             profile.cachedFolderPath = folderPath;
             profile.requiresRescan = false;
-        }
-
-        if (!Gio.File.new_for_path(folderPath).query_exists(null)) {
-            profile.currentImagePath = '';
-            profile._statusMessage = _('Folder not found');
-            this._updateWidgetAppearance(widget, profile);
-            return;
         }
 
         if (fileNames.length === 0) {
