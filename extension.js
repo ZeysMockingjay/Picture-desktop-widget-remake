@@ -4,6 +4,11 @@ import Gio from 'gi://Gio';
 import Clutter from 'gi://Clutter';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import { Extension, gettext as _ } from 'resource:///org/gnome/shell/extensions/extension.js';
+import {
+    createDefaultProfile,
+    normalizeProfiles,
+    toPersistedProfile,
+} from './profile-utils.js';
 
 /**
  * Picture Desktop Widget extension
@@ -17,7 +22,8 @@ import { Extension, gettext as _ } from 'resource:///org/gnome/shell/extensions/
  */
 // Scanning limits to avoid blocking on extremely large folders
 const MAX_SCAN_DEPTH = 6;
-const MAX_SCAN_FILES = 20000;
+const MAX_SCAN_FILES = 5000;
+const MAX_SCAN_DURATION_MS = 150;
 const SKIP_DOT_DIRS = true;
 const SUPPORTED_IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg'];
 
@@ -26,13 +32,13 @@ export default class PictureDesktopWidgetExtension extends Extension {
         this.settings = this.getSettings();
         this._dirMonitors = new Map();
         this._monitorDebounceIds = new Map();
-        this._profiles = this._normalizeProfiles(this._loadProfiles());
+        this._profiles = this._loadProfiles();
         this._widgetByProfileId = new Map();
         this._timeoutIds = new Map();
         this._reloadingProfiles = false;
 
         if (this._profiles.length === 0) {
-            this._profiles = [this._createDefaultProfile()];
+            this._profiles = [createDefaultProfile(_('Default widget'))];
         }
 
         // Create all widgets and start their timers BEFORE saving, to prevent
@@ -170,98 +176,6 @@ export default class PictureDesktopWidgetExtension extends Extension {
         this._monitorDebounceIds.set(profileId, timeoutId);
     }
 
-    _createDefaultProfile() {
-        // Create a sane default profile used when none are configured.
-        return this._normalizeProfile({
-            id: `profile-${Math.random().toString(36).slice(2, 10)}`,
-            name: 'Default widget',
-            imagePath: '',
-            widgetSize: 200,
-            widgetPositionX: 100,
-            widgetPositionY: 100,
-            widgetAspectRatio: 1.0,
-            widgetTimeout: 60,
-            widgetCornerRadius: 20,
-            timeLastUpdate: 0,
-            currentImagePath: '',
-            cachedFiles: [],
-            cachedFolderPath: '',
-            visible: true,
-            requiresRescan: true,
-        });
-    }
-
-    _normalizeProfile(profile = {}, fallback = {}) {
-        // Normalize profile values providing fallback defaults and type coercion.
-        const profileVisible = profile.visible;
-        const fallbackVisible = fallback.visible;
-
-        const normalized = {
-            id: profile.id ||
-                 fallback.id ||
-                 `profile-${Math.random().toString(36).slice(2, 10)}`,
-            name: profile.name || fallback.name || _('Default widget'),
-            imagePath: profile.imagePath ?? fallback.imagePath ?? '',
-            widgetSize: Number.isFinite(Number(profile.widgetSize))
-                ? Number(profile.widgetSize)
-                : (Number.isFinite(Number(fallback.widgetSize))
-                    ? Number(fallback.widgetSize)
-                    : 200),
-            widgetPositionX: Number.isFinite(Number(profile.widgetPositionX))
-                ? Number(profile.widgetPositionX)
-                : (Number.isFinite(Number(fallback.widgetPositionX))
-                    ? Number(fallback.widgetPositionX)
-                    : 100),
-            widgetPositionY: Number.isFinite(Number(profile.widgetPositionY))
-                ? Number(profile.widgetPositionY)
-                : (Number.isFinite(Number(fallback.widgetPositionY))
-                    ? Number(fallback.widgetPositionY)
-                    : 100),
-            widgetAspectRatio: Number.isFinite(Number(profile.widgetAspectRatio))
-                ? Number(profile.widgetAspectRatio)
-                : (Number.isFinite(Number(fallback.widgetAspectRatio))
-                    ? Number(fallback.widgetAspectRatio)
-                    : 1.0),
-            widgetTimeout: Number.isFinite(Number(profile.widgetTimeout))
-                ? Number(profile.widgetTimeout)
-                : (Number.isFinite(Number(fallback.widgetTimeout))
-                    ? Number(fallback.widgetTimeout)
-                    : 60),
-            widgetCornerRadius: Number.isFinite(Number(profile.widgetCornerRadius))
-                ? Number(profile.widgetCornerRadius)
-                : (Number.isFinite(Number(fallback.widgetCornerRadius))
-                    ? Number(fallback.widgetCornerRadius)
-                    : 20),
-            timeLastUpdate: Number.isFinite(Number(profile.timeLastUpdate))
-                ? Number(profile.timeLastUpdate)
-                : (Number.isFinite(Number(fallback.timeLastUpdate))
-                    ? Number(fallback.timeLastUpdate)
-                    : 0),
-            currentImagePath: profile.currentImagePath ?? fallback.currentImagePath ?? '',
-            cachedFiles: Array.isArray(profile.cachedFiles)
-                ? profile.cachedFiles
-                : (Array.isArray(fallback.cachedFiles) ? fallback.cachedFiles : []),
-            cachedFolderPath: profile.cachedFolderPath ?? fallback.cachedFolderPath ?? '',
-            visible: profileVisible === undefined
-                ? fallbackVisible !== false
-                : profileVisible !== false,
-            requiresRescan: profile.requiresRescan === true ||
-                            fallback.requiresRescan === true ||
-                            (profile.requiresRescan === undefined &&
-                             fallback.requiresRescan === undefined),
-        };
-
-        if (normalized.widgetSize < 20) normalized.widgetSize = 20;
-        if (normalized.widgetTimeout < 5) normalized.widgetTimeout = 5;
-        if (normalized.widgetCornerRadius < 0) normalized.widgetCornerRadius = 0;
-        return normalized;
-    }
-
-    _normalizeProfiles(profiles) {
-        if (!Array.isArray(profiles)) return [];
-        return profiles.map(p => this._normalizeProfile(p));
-    }
-
     _loadProfiles() {
         // Load serialized profiles from GSettings. Be defensive: a corrupt
         // value should not crash the extension.
@@ -269,7 +183,7 @@ export default class PictureDesktopWidgetExtension extends Extension {
             const raw = this.settings.get_string('widget-profiles');
             const parsed = JSON.parse(raw);
             if (Array.isArray(parsed)) {
-                return parsed;
+                return normalizeProfiles(parsed, _('Default widget'));
             }
         } catch (error) {
             console.warn(`Unable to parse widget profiles: ${error}`);
@@ -277,25 +191,11 @@ export default class PictureDesktopWidgetExtension extends Extension {
         return [];
     }
 
-    _toPersistedProfile(profile = {}) {
-        const normalized = this._normalizeProfile(profile);
-        return {
-            id: normalized.id,
-            name: normalized.name,
-            imagePath: normalized.imagePath,
-            widgetSize: normalized.widgetSize,
-            widgetPositionX: normalized.widgetPositionX,
-            widgetPositionY: normalized.widgetPositionY,
-            widgetAspectRatio: normalized.widgetAspectRatio,
-            widgetTimeout: normalized.widgetTimeout,
-            widgetCornerRadius: normalized.widgetCornerRadius,
-            visible: normalized.visible !== false,
-        };
-    }
-
     _saveProfiles(profiles = this._profiles) {
         if (!this.settings) return;
-        const toSave = profiles.map(profile => this._toPersistedProfile(profile));
+        const toSave = profiles.map(profile =>
+            toPersistedProfile(profile, _('Default widget'))
+        );
         this.settings.set_string('widget-profiles', JSON.stringify(toSave));
         if (!this.settings.get_string('active-profile-id') && toSave[0]) {
             this.settings.set_string('active-profile-id', toSave[0].id);
@@ -435,8 +335,11 @@ export default class PictureDesktopWidgetExtension extends Extension {
 
         // Depth-first directory scan with limits to avoid long blocking ops.
         // Returns relative paths (from folderPath) of matching image files.
+        const scanStartTime = Date.now();
+
         const scanDirectory = (directory, relativeBase = '', depth = 0) => {
             if (depth >= MAX_SCAN_DEPTH) return;
+            if (Date.now() - scanStartTime >= MAX_SCAN_DURATION_MS) return;
             try {
                 const enumerator = directory.enumerate_children(
                     'standard::name,standard::type',
@@ -445,7 +348,9 @@ export default class PictureDesktopWidgetExtension extends Extension {
                 );
                 let info;
                 while ((info = enumerator.next_file(null)) !== null) {
-                    if (fileNames.length >= MAX_SCAN_FILES) break;
+                    if (fileNames.length >= MAX_SCAN_FILES ||
+                        Date.now() - scanStartTime >= MAX_SCAN_DURATION_MS)
+                        break;
                     const childName = info.get_name();
                     // Skip dot-directories like .cache or .git
                     if (SKIP_DOT_DIRS && childName.startsWith('.')) {
@@ -473,7 +378,7 @@ export default class PictureDesktopWidgetExtension extends Extension {
         };
 
         scanDirectory(folder);
-        return fileNames.sort();
+        return fileNames;
     }
 
     _updateWidgetAppearance(widget, profile) {
@@ -560,7 +465,9 @@ export default class PictureDesktopWidgetExtension extends Extension {
         this._reloadingProfiles = true;
 
         try {
-            const incoming = this._normalizeProfiles(this._loadProfiles());
+            let incoming = this._loadProfiles();
+            if (incoming.length === 0)
+                incoming = [createDefaultProfile(_('Default widget'))];
             const incomingIds = new Set(incoming.map(p => p.id));
             const existingIds = new Set(this._profiles.map(p => p.id));
 
