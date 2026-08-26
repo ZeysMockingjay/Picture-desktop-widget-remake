@@ -202,6 +202,8 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
             spacing: 18,
             hexpand: true,
             vexpand: true,
+            margin_end: 12,
+            margin_bottom: 12,
         });
         settingsScroll.set_child(settingsContent);
 
@@ -601,7 +603,7 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
             orientation: Gtk.Orientation.VERTICAL,
             spacing: 14,
             margin_top: 18,
-            margin_bottom: 18,
+            margin_bottom: 10,
             margin_start: 18,
             margin_end: 18,
         });

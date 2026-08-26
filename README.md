@@ -16,14 +16,15 @@ This project is a remake of the original Picture Desktop Widget idea, expanded w
 
 ## About
 
-Version 25.1
+Version 26
 
 Maintained by:
 - Maximilian Rosenbaum
 
+Special Thanks to: 
+- Elias-Leander Ahlers
 
 Credits:
-- Elias-Leander Ahlers
 - Original creator: GaszokS: Based on Picture Desktop Widget
 
 ## Installation
