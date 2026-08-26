@@ -259,7 +259,6 @@ export default class PictureDesktopWidgetExtension extends Extension {
         }
         const widget = new St.Widget();
         widget._profileId = profile.id;
-        widget._profileName = profile.name;
         widget.visible = profile.visible !== false;
         Main.layoutManager._backgroundGroup.add_child(widget);
         this._widgetByProfileId.set(profile.id, widget);
@@ -339,6 +338,14 @@ export default class PictureDesktopWidgetExtension extends Extension {
             return;
         }
 
+        const folder = Gio.File.new_for_path(folderPath);
+        if (!folder.query_exists(null)) {
+            profile.currentImagePath = '';
+            profile._statusMessage = _('Folder not found');
+            this._updateWidgetAppearance(widget, profile);
+            return;
+        }
+
         let fileNames = profile.cachedFiles || [];
         const shouldRescan = force ||
             profile.requiresRescan ||
@@ -350,13 +357,6 @@ export default class PictureDesktopWidgetExtension extends Extension {
             profile.cachedFiles = fileNames;
             profile.cachedFolderPath = folderPath;
             profile.requiresRescan = false;
-        }
-
-        if (!Gio.File.new_for_path(folderPath).query_exists(null)) {
-            profile.currentImagePath = '';
-            profile._statusMessage = _('Folder not found');
-            this._updateWidgetAppearance(widget, profile);
-            return;
         }
 
         if (fileNames.length === 0) {

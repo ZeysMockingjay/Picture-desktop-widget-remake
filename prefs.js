@@ -10,7 +10,10 @@ import { ExtensionPreferences, gettext as _ } from 'resource:///org/gnome/Shell/
 
 const FRAME_TILE_SIZE = 200;
 const FRAME_TILE_PADDING = 12;
-const FRAME_TILE_SPACING = 10;
+const FRAME_TILE_SPACING = 12;
+const SPACING_XS = 6;
+const SPACING_SM = 12;
+const SPACING_MD = 18;
 const SUPPORTED_IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg'];
 
 export default class PictureDesktopWidgetPreferences extends ExtensionPreferences {
@@ -56,7 +59,6 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
         this._frameDashboardFlow = null;
         this._settingsHeaderTitle = null;
         this._settingsHeaderSubtitle = null;
-        this._settingsPageButton = null;
         this._deleteFrameButton = null;
         this._profileSaveTimeoutId = 0;
         this._frameTileStyleProvider = null;
@@ -80,20 +82,20 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
         const shellGroup = new Adw.PreferencesGroup();
         const shellBox = new Gtk.Box({
             orientation: Gtk.Orientation.VERTICAL,
-            spacing: 18,
+            spacing: SPACING_MD,
         });
         shellGroup.add(shellBox);
         page.add(shellGroup);
 
         const headerBox = new Gtk.Box({
             orientation: Gtk.Orientation.HORIZONTAL,
-            spacing: 12,
+            spacing: SPACING_SM,
             hexpand: true,
-            margin_bottom: 6,
+            margin_bottom: SPACING_SM,
         });
         const headerText = new Gtk.Box({
             orientation: Gtk.Orientation.VERTICAL,
-            spacing: 4,
+            spacing: SPACING_XS,
             hexpand: true,
         });
         const headerTitle = new Gtk.Label({
@@ -136,8 +138,8 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
         this._frameDashboardFlow = new Gtk.FlowBox({
             selection_mode: Gtk.SelectionMode.NONE,
             valign: Gtk.Align.START,
-            row_spacing: 16,
-            column_spacing: 16,
+            row_spacing: SPACING_SM,
+            column_spacing: SPACING_SM,
             homogeneous: false,
             max_children_per_line: 4,
         });
@@ -147,7 +149,7 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
 
         const settingsBox = new Gtk.Box({
             orientation: Gtk.Orientation.VERTICAL,
-            spacing: 14,
+            spacing: SPACING_SM,
             hexpand: true,
             vexpand: true,
         });
@@ -155,9 +157,9 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
 
         const settingsHeader = new Gtk.Box({
             orientation: Gtk.Orientation.HORIZONTAL,
-            spacing: 10,
+            spacing: SPACING_SM,
             hexpand: true,
-            margin_bottom: 8,
+            margin_bottom: SPACING_SM,
         });
         settingsHeader.add_css_class('image-frame-settings-header');
         const settingsBack = this._createActionButton(
@@ -167,11 +169,10 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
         );
         settingsBack.set_tooltip_text(_('Back to image frames'));
         settingsBack.connect('clicked', () => this._showDashboard());
-        this._settingsPageButton = settingsBack;
 
         const settingsHeaderText = new Gtk.Box({
             orientation: Gtk.Orientation.VERTICAL,
-            spacing: 4,
+            spacing: SPACING_XS,
             hexpand: true,
         });
         this._settingsHeaderTitle = new Gtk.Label({
@@ -199,11 +200,11 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
         });
         const settingsContent = new Gtk.Box({
             orientation: Gtk.Orientation.VERTICAL,
-            spacing: 18,
+            spacing: SPACING_MD,
             hexpand: true,
             vexpand: true,
-            margin_end: 12,
-            margin_bottom: 12,
+            margin_end: SPACING_SM,
+            margin_bottom: SPACING_MD,
         });
         settingsScroll.set_child(settingsContent);
 
@@ -268,7 +269,6 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
                 this.settings.set_string('active-profile-id', this._activeProfileId);
                 this._saveProfiles();
                 this._refreshFrameDashboard();
-                this._updateSettingRows();
                 this._showSettingsPage();
                 dlg.destroy();
             });
@@ -313,8 +313,7 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
         this._aspectRatioRow = this._createSliderRow(
             _('Aspect Ratio'), 0.25, 4, 0.01, 0.1,
             () => this._getActiveProfile()?.widgetAspectRatio || 1.0,
-            value => this._setActiveProfileValue('widgetAspectRatio', value),
-            'double'
+            value => this._setActiveProfileValue('widgetAspectRatio', value)
         );
         this._aspectRatioRow.set_subtitle(_('Width relative to height (1.0 = square)'));
         imageGroup.add(this._aspectRatioRow);
@@ -351,6 +350,7 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
             orientation: Gtk.Orientation.HORIZONTAL,
             hexpand: true,
             halign: Gtk.Align.FILL,
+            margin_bottom: SPACING_SM,
         });
         actionsBox.append(this._deleteFrameButton);
         actionsGroup.add(actionsBox);
@@ -367,6 +367,7 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
 
         window.connect('close-request', () => {
             this._flushQueuedProfileSave();
+            this._uninstallFrameTileStyles();
             this.settings = null;
         });
 
@@ -596,16 +597,15 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
             modal: true,
             resizable: false,
             default_width: 520,
-            default_height: 260,
         });
 
         const content = new Gtk.Box({
             orientation: Gtk.Orientation.VERTICAL,
-            spacing: 14,
-            margin_top: 18,
-            margin_bottom: 10,
-            margin_start: 18,
-            margin_end: 18,
+            spacing: SPACING_SM,
+            margin_top: SPACING_MD,
+            margin_bottom: SPACING_MD,
+            margin_start: SPACING_MD,
+            margin_end: SPACING_MD,
         });
         const title = new Gtk.Label({
             label: _('Picture Desktop Widget Remake'),
@@ -629,7 +629,7 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
 
         const actions = new Gtk.Box({
             orientation: Gtk.Orientation.HORIZONTAL,
-            spacing: 8,
+            spacing: SPACING_XS,
             halign: Gtk.Align.END,
         });
         const buyMeACoffeeButton = this._createActionButton(
@@ -672,11 +672,11 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
 
         const content = new Gtk.Box({
             orientation: Gtk.Orientation.VERTICAL,
-            spacing: 12,
-            margin_top: 18,
-            margin_bottom: 18,
-            margin_start: 18,
-            margin_end: 18,
+            spacing: SPACING_SM,
+            margin_top: SPACING_MD,
+            margin_bottom: SPACING_MD,
+            margin_start: SPACING_MD,
+            margin_end: SPACING_MD,
         });
         const detailsText = new Gtk.Label({
             label: _(
@@ -688,7 +688,7 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
         });
         const actions = new Gtk.Box({
             orientation: Gtk.Orientation.HORIZONTAL,
-            spacing: 8,
+            spacing: SPACING_XS,
             halign: Gtk.Align.END,
         });
         const issueButton = this._createActionButton(
@@ -908,7 +908,6 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
                 this.settings.set_string('active-profile-id', profileToAdd.id);
                 this._saveProfiles();
                 this._refreshFrameDashboard();
-                this._updateSettingRows();
                 this._showSettingsPage();
             });
         } else {
@@ -953,11 +952,11 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
             }
 
             .image-frame-settings-panel {
-                padding: 2px 2px 6px 2px;
+                padding: 0;
             }
 
             .image-frame-settings-header {
-                margin-bottom: 4px;
+                margin-bottom: 0;
             }
 
             .frame-tile.frame-selected {
@@ -981,6 +980,20 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
                 Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
             );
         }
+    }
+
+    _uninstallFrameTileStyles() {
+        if (!this._frameTileStyleProvider)
+            return;
+
+        const display = Gdk.Display.get_default();
+        if (display) {
+            Gtk.StyleContext.remove_provider_for_display(
+                display,
+                this._frameTileStyleProvider
+            );
+        }
+        this._frameTileStyleProvider = null;
     }
 
     // -----------------------------------------------------------------------
@@ -1010,7 +1023,7 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
     }
 
     _createSliderRow(title, lower, upper, stepIncrement, pageIncrement,
-                     getter, setter, settingType = 'int') {
+                     getter, setter) {
         const digits = stepIncrement < 1
             ? Math.ceil(-Math.log10(stepIncrement))
             : 0;
