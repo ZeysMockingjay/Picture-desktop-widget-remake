@@ -11,6 +11,14 @@ import { ExtensionPreferences, gettext as _ } from 'resource:///org/gnome/Shell/
 const FRAME_TILE_SIZE = 200;
 const FRAME_TILE_PADDING = 12;
 const FRAME_TILE_SPACING = 10;
+const SECTION_SPACING = 20;
+const STACK_PAGE_SPACING = 14;
+const SCROLL_CONTENT_MARGIN_TOP = 12;
+const SCROLL_CONTENT_MARGIN_BOTTOM = 40;
+const SCROLL_CONTENT_MARGIN_START = 14;
+const SCROLL_CONTENT_MARGIN_END = 24;
+const SETTINGS_SCROLL_CONTENT_MARGIN_BOTTOM = 56;
+const ACTIONS_GROUP_MARGIN_BOTTOM = 24;
 const SUPPORTED_IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg'];
 
 export default class PictureDesktopWidgetPreferences extends ExtensionPreferences {
@@ -81,7 +89,7 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
         const shellGroup = new Adw.PreferencesGroup();
         const shellBox = new Gtk.Box({
             orientation: Gtk.Orientation.VERTICAL,
-            spacing: 18,
+            spacing: SECTION_SPACING,
         });
         shellGroup.add(shellBox);
         page.add(shellGroup);
@@ -125,7 +133,7 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
 
         const dashboardBox = new Gtk.Box({
             orientation: Gtk.Orientation.VERTICAL,
-            spacing: 12,
+            spacing: STACK_PAGE_SPACING,
             hexpand: true,
             vexpand: true,
         });
@@ -136,10 +144,10 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
         });
         const dashboardContent = new Gtk.Box({
             orientation: Gtk.Orientation.VERTICAL,
-            margin_top: 6,
-            margin_bottom: 18,
-            margin_start: 6,
-            margin_end: 12,
+            margin_top: SCROLL_CONTENT_MARGIN_TOP,
+            margin_bottom: SCROLL_CONTENT_MARGIN_BOTTOM,
+            margin_start: SCROLL_CONTENT_MARGIN_START,
+            margin_end: SCROLL_CONTENT_MARGIN_END,
         });
         this._frameDashboardFlow = new Gtk.FlowBox({
             selection_mode: Gtk.SelectionMode.NONE,
@@ -156,7 +164,7 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
 
         const settingsBox = new Gtk.Box({
             orientation: Gtk.Orientation.VERTICAL,
-            spacing: 14,
+            spacing: STACK_PAGE_SPACING,
             hexpand: true,
             vexpand: true,
         });
@@ -207,13 +215,13 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
         });
         const settingsContent = new Gtk.Box({
             orientation: Gtk.Orientation.VERTICAL,
-            spacing: 18,
+            spacing: SECTION_SPACING,
             hexpand: true,
             vexpand: true,
-            margin_top: 6,
-            margin_bottom: 18,
-            margin_start: 6,
-            margin_end: 12,
+            margin_top: SCROLL_CONTENT_MARGIN_TOP,
+            margin_bottom: SETTINGS_SCROLL_CONTENT_MARGIN_BOTTOM,
+            margin_start: SCROLL_CONTENT_MARGIN_START,
+            margin_end: SCROLL_CONTENT_MARGIN_END,
         });
         settingsScroll.set_child(settingsContent);
 
@@ -357,10 +365,13 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
         actionsGroup.set_description(
             _('Use this button to remove the currently selected frame.')
         );
+        actionsGroup.set_margin_bottom(ACTIONS_GROUP_MARGIN_BOTTOM);
         const actionsBox = new Gtk.Box({
             orientation: Gtk.Orientation.HORIZONTAL,
             hexpand: true,
             halign: Gtk.Align.FILL,
+            margin_top: 4,
+            margin_bottom: 6,
         });
         actionsBox.append(this._deleteFrameButton);
         actionsGroup.add(actionsBox);
