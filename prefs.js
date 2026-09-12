@@ -82,7 +82,6 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
         });
         shellGroup.add(shellBox);
         page.add(shellGroup);
-        window.add(page);
 
         const headerBox = new Gtk.Box({
             orientation: Gtk.Orientation.HORIZONTAL,
@@ -127,7 +126,10 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
             margin_top: SPACING_SM,
         });
         aboutActions.append(aboutButton);
-        shellBox.append(aboutActions);
+        const aboutGroup = new Adw.PreferencesGroup();
+        aboutGroup.add(aboutActions);
+        page.add(aboutGroup);
+        window.add(page);
 
         const dashboardBox = new Gtk.Box({
             orientation: Gtk.Orientation.VERTICAL,
@@ -585,8 +587,6 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
 
     _recordDeveloperError(message) {
         if (message) {
-            if (!this._developerErrors)
-                this._developerErrors = [];
             this._developerErrors.push(String(message));
             console.warn(message);
         }
@@ -595,8 +595,8 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
     _getDeveloperOutput() {
         const profileCount = Array.isArray(this._profiles) ? this._profiles.length : 0;
         const activeProfile = this._getActiveProfile();
-        const settingsPath = this.settings?.settings_schema?.get_id?.() || _('Unknown');
-        const errors = this._developerErrors?.length
+        const settingsPath = this.settings.settings_schema.get_id();
+        const errors = this._developerErrors.length
             ? this._developerErrors.join('\n')
             : _('No preference errors have been captured.');
 
@@ -610,9 +610,6 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
             '',
             _('Preference errors:'),
             errors,
-            '',
-            _('For extension load or runtime errors, run this in a terminal:'),
-            'journalctl -b _COMM=gnome-shell | grep -i "picture-desktop\\|extension error"',
         ].join('\n');
     }
 
