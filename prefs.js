@@ -67,18 +67,13 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
         const page = new Adw.PreferencesPage();
         page.set_title(_('Image Frames'));
         page.set_name(_('Image Frames'));
-        const toolbarView = new Adw.ToolbarView();
-        const headerBar = new Gtk.HeaderBar({
-            show_title_buttons: true,
-        });
-        const aboutButton = Gtk.Button.new_from_icon_name('help-about-symbolic');
-        aboutButton.add_css_class('flat');
+        const aboutButton = this._createActionButton(
+            _('About'),
+            'help-about-symbolic',
+            'image-frame-action-button about-action-button'
+        );
         aboutButton.set_tooltip_text(_('About'));
         aboutButton.connect('clicked', () => this._showAboutDialog(window));
-        headerBar.pack_end(aboutButton);
-        toolbarView.add_top_bar(headerBar);
-        toolbarView.set_content(page);
-        window.set_content(toolbarView);
 
         const shellGroup = new Adw.PreferencesGroup();
         const shellBox = new Gtk.Box({
@@ -87,6 +82,7 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
         });
         shellGroup.add(shellBox);
         page.add(shellGroup);
+        window.add(page);
 
         const headerBox = new Gtk.Box({
             orientation: Gtk.Orientation.HORIZONTAL,
@@ -124,6 +120,14 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
             vexpand: true,
         });
         shellBox.append(this._frameStack);
+
+        const aboutActions = new Gtk.Box({
+            orientation: Gtk.Orientation.HORIZONTAL,
+            halign: Gtk.Align.END,
+            margin_top: SPACING_SM,
+        });
+        aboutActions.append(aboutButton);
+        shellBox.append(aboutActions);
 
         const dashboardBox = new Gtk.Box({
             orientation: Gtk.Orientation.VERTICAL,
@@ -1037,6 +1041,11 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
                 border-radius: 12px;
                 padding: 4px 10px;
                 margin: 0;
+            }
+
+            .about-action-button {
+                min-height: 28px;
+                padding: 2px 18px;
             }
 
             .image-frame-action-button > box {

@@ -1,5 +1,5 @@
 {
-  "description": "Create multiple desktop widgets that display random images from configurable folders. Each widget can use its own folder, size, position, corner radius, aspect ratio and refresh interval.",
+  "description": "Create multiple desktop image frames with independent folders, size, position, corner radius, aspect ratio, visibility, and refresh intervals.",
   "gettext-domain": "Picture-desktop-widget-remake",
   "name": "Picture Desktop Widget Remake",
   "settings-schema": "org.gnome.shell.extensions.Picture-desktop-widget",
@@ -8,7 +8,7 @@
   ],
   "url": "https://github.com/ZeysMockingjay/Picture-desktop-widget-remake",
   "uuid": "picture-desktop-remake@ZeysMockingjay.Github.com",
-  "version": 27,
+  "version": 30,
   "donations": {
     "buymeacoffee": "MaximilianRosenbaum"
   }

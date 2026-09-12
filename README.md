@@ -1,5 +1,7 @@
 # Picture Desktop Widget Remake
 
+Version 30
+
 A simple GNOME Shell extension that displays random images from a chosen folder directly on the desktop as customizable widgets.
 
 This project is a remake of the original Picture Desktop Widget idea, expanded with support for multiple frames and more flexible customization. Each widget can be placed independently on the screen and configured to match your desktop style.
@@ -12,20 +14,15 @@ This project is a remake of the original Picture Desktop Widget idea, expanded w
 - Assign each widget its own image folder
 - Customize size, position, corner radius, and aspect ratio
 - Adjust how often new images are selected
-- Supports JPEG, PNG, GIF, BMP, and WebP images
+- Supports JPEG, PNG, GIF, BMP, WebP, and SVG images
 
 ## About
 
-Version 27
-
 Maintained by:
 - Maximilian Rosenbaum
-
-Special Thanks to: 
 - Elias-Leander Ahlers
 
-Credits:
-- Original creator: GaszokS: Based on Picture Desktop Widget
+Based on the original Picture Desktop Widget by GaszokS.
 
 ## Installation
 
@@ -37,4 +34,4 @@ Credits:
 
 ## Contributing
 
-If you find a bug or have a suggestion, feel free to open an issue in this repository.
+If you find a bug or have a suggestion, please [open an issue](https://github.com/ZeysMockingjay/Picture-desktop-widget-remake/issues).
