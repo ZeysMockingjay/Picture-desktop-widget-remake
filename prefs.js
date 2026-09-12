@@ -45,6 +45,7 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
 
     fillPreferencesWindow(window) {
         this.settings = this.getSettings();
+        this._developerErrors = [];
         window.set_title(_('Picture Desktop Widget Remake'));
         window.set_default_size(780, 700);
         this._profiles = this._normalizeProfiles(this._loadProfiles());
@@ -579,8 +580,94 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
     }
 
     _recordDeveloperError(message) {
-        if (message)
+        if (message) {
+            if (!this._developerErrors)
+                this._developerErrors = [];
+            this._developerErrors.push(String(message));
             console.warn(message);
+        }
+    }
+
+    _getDeveloperOutput() {
+        const profileCount = Array.isArray(this._profiles) ? this._profiles.length : 0;
+        const activeProfile = this._getActiveProfile();
+        const settingsPath = this.settings?.settings_schema?.get_id?.() || _('Unknown');
+        const errors = this._developerErrors?.length
+            ? this._developerErrors.join('\n')
+            : _('No preference errors have been captured.');
+
+        return [
+            _('Picture Desktop Widget Remake developer output'),
+            `${_('Version')}: ${this._getExtensionVersion()}`,
+            `${_('UUID')}: ${this.metadata?.uuid || _('Unknown')}`,
+            `${_('Settings schema')}: ${settingsPath}`,
+            `${_('Profiles loaded')}: ${profileCount}`,
+            `${_('Active profile')}: ${activeProfile?.name || _('None')}`,
+            '',
+            _('Preference errors:'),
+            errors,
+            '',
+            _('For extension load or runtime errors, run this in a terminal:'),
+            'journalctl -b _COMM=gnome-shell | grep -i "picture-desktop\\|extension error"',
+        ].join('\n');
+    }
+
+    _showDeveloperOutput(window) {
+        const dialog = new Gtk.Window({
+            title: _('Developer Output'),
+            transient_for: window,
+            modal: true,
+            default_width: 620,
+            default_height: 420,
+        });
+        const content = new Gtk.Box({
+            orientation: Gtk.Orientation.VERTICAL,
+            spacing: SPACING_SM,
+            margin_top: SPACING_MD,
+            margin_bottom: SPACING_MD,
+            margin_start: SPACING_MD,
+            margin_end: SPACING_MD,
+        });
+        const output = new Gtk.TextView({
+            editable: false,
+            monospace: true,
+            wrap_mode: Gtk.WrapMode.WORD_CHAR,
+            vexpand: true,
+        });
+        output.get_buffer().set_text(this._getDeveloperOutput(), -1);
+        const scroll = new Gtk.ScrolledWindow({
+            hexpand: true,
+            vexpand: true,
+            min_content_height: 280,
+        });
+        scroll.set_child(output);
+        const actions = new Gtk.Box({
+            orientation: Gtk.Orientation.HORIZONTAL,
+            spacing: SPACING_XS,
+            halign: Gtk.Align.END,
+        });
+        const copyButton = this._createActionButton(
+            _('Copy Output'),
+            'edit-copy-symbolic',
+            'image-frame-action-button'
+        );
+        copyButton.connect('clicked', () => {
+            const display = Gdk.Display.get_default();
+            if (display)
+                display.get_clipboard().set(this._getDeveloperOutput());
+        });
+        const closeButton = this._createActionButton(
+            _('Close'),
+            'window-close-symbolic',
+            'image-frame-action-button'
+        );
+        closeButton.connect('clicked', () => dialog.close());
+        actions.append(copyButton);
+        actions.append(closeButton);
+        content.append(scroll);
+        content.append(actions);
+        dialog.set_child(content);
+        dialog.present();
     }
 
     _getExtensionVersion() {
@@ -651,8 +738,18 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
             this._showAboutDetails(window);
         });
 
+        const developerOutputButton = this._createActionButton(
+            _('Developer Output'),
+            'utilities-terminal-symbolic',
+            'image-frame-action-button'
+        );
+        developerOutputButton.connect('clicked', () => {
+            this._showDeveloperOutput(window);
+        });
+
         actions.append(buyMeACoffeeButton);
         actions.append(detailsButton);
+        actions.append(developerOutputButton);
         content.append(title);
         content.append(subtitle);
         content.append(credits);
