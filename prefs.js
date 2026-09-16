@@ -484,7 +484,9 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
         const toSave = this._normalizeProfiles(
             this._profiles.map(p => ({ ...p }))
         );
-        this.settings.set_string('widget-profiles', JSON.stringify(toSave));
+        const serializedProfiles = JSON.stringify(toSave);
+        if (this.settings.get_string('widget-profiles') !== serializedProfiles)
+            this.settings.set_string('widget-profiles', serializedProfiles);
     }
 
     _createProfile() {
