@@ -66,7 +66,7 @@ export default class PictureDesktopWidgetExtension extends Extension {
     disable() {
         this._reloadingProfiles = true;
 
-        for (const [id, timeoutId] of this._timeoutIds) {
+        for (const timeoutId of this._timeoutIds.values()) {
             if (timeoutId) {
                 GLib.Source.remove(timeoutId);
             }
@@ -240,8 +240,6 @@ export default class PictureDesktopWidgetExtension extends Extension {
     }
 
     _clearMonitorRefreshDebounce(profileId) {
-        if (!this._monitorDebounceTimeoutIds)
-            return;
         const timeoutId = this._monitorDebounceTimeoutIds.get(profileId);
         if (timeoutId) {
             GLib.Source.remove(timeoutId);
