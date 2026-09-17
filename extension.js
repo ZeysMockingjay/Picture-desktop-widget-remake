@@ -18,6 +18,8 @@ import { Extension, gettext as _ } from 'resource:///org/gnome/shell/extensions/
 // Scanning limits to avoid blocking on extremely large folders
 const MAX_SCAN_DEPTH = 6;
 const MAX_SCAN_FILES = 20000;
+const MONITOR_RATE_LIMIT_MS = 500;
+const MONITOR_DEBOUNCE_MS = 400;
 const SKIP_DOT_DIRS = true;
 const SUPPORTED_IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg'];
 
@@ -28,11 +30,13 @@ export default class PictureDesktopWidgetExtension extends Extension {
         this._profiles = this._normalizeProfiles(this._loadProfiles());
         this._widgetByProfileId = new Map();
         this._timeoutIds = new Map();
+        this._monitorDebounceTimeoutIds = new Map();
         this._reloadingProfiles = false;
 
         if (this._profiles.length === 0) {
             this._profiles = [this._createDefaultProfile()];
         }
+        this._rebuildProfileIndex();
 
         // Create all widgets and start their timers BEFORE saving, to prevent
         // the 'changed::widget-profiles' signal from triggering _reloadProfiles
@@ -62,12 +66,16 @@ export default class PictureDesktopWidgetExtension extends Extension {
     disable() {
         this._reloadingProfiles = true;
 
-        for (const [id, timeoutId] of this._timeoutIds) {
+        for (const timeoutId of this._timeoutIds.values()) {
             if (timeoutId) {
                 GLib.Source.remove(timeoutId);
             }
         }
         this._timeoutIds.clear();
+        for (const profileId of this._monitorDebounceTimeoutIds.keys()) {
+            this._clearMonitorRefreshDebounce(profileId);
+        }
+        this._monitorDebounceTimeoutIds.clear();
 
         if (this.settings)
             this.settings.disconnectObject(this);
@@ -86,6 +94,7 @@ export default class PictureDesktopWidgetExtension extends Extension {
             this._dirMonitors.clear();
         }
         this._profiles = [];
+        this._profileById = new Map();
         this.settings = null;
     }
 
@@ -105,11 +114,9 @@ export default class PictureDesktopWidgetExtension extends Extension {
 
             const file = Gio.File.new_for_path(profile.imagePath);
             const monitor = file.monitor_directory(Gio.FileMonitorFlags.NONE, null);
+            monitor.set_rate_limit(MONITOR_RATE_LIMIT_MS);
             monitor.connectObject('changed', () => {
-                profile.requiresRescan = true;
-                // Trigger an immediate refresh cycle for this profile
-                this._refreshProfile(profile, false);
-                this._scheduleProfileRefresh(profile);
+                this._queueMonitorRefresh(profile.id);
             }, this);
             this._dirMonitors.set(profile.id, monitor);
         } catch (error) {
@@ -126,6 +133,7 @@ export default class PictureDesktopWidgetExtension extends Extension {
             this._disconnectAndCancelMonitor(monitor);
             this._dirMonitors.delete(profileId);
         }
+        this._clearMonitorRefreshDebounce(profileId);
     }
 
     _disconnectAndCancelMonitor(monitor) {
@@ -227,6 +235,35 @@ export default class PictureDesktopWidgetExtension extends Extension {
         return profiles.map(p => this._normalizeProfile(p));
     }
 
+    _rebuildProfileIndex() {
+        this._profileById = new Map(this._profiles.map(profile => [profile.id, profile]));
+    }
+
+    _clearMonitorRefreshDebounce(profileId) {
+        const timeoutId = this._monitorDebounceTimeoutIds.get(profileId);
+        if (timeoutId) {
+            GLib.Source.remove(timeoutId);
+            this._monitorDebounceTimeoutIds.delete(profileId);
+        }
+    }
+
+    _queueMonitorRefresh(profileId) {
+        if (!profileId || this._monitorDebounceTimeoutIds.has(profileId))
+            return;
+
+        const timeoutId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, MONITOR_DEBOUNCE_MS, () => {
+            this._monitorDebounceTimeoutIds.delete(profileId);
+            const profile = this._profileById.get(profileId);
+            if (!profile)
+                return GLib.SOURCE_REMOVE;
+            profile.requiresRescan = true;
+            this._refreshProfile(profile, false);
+            this._scheduleProfileRefresh(profile);
+            return GLib.SOURCE_REMOVE;
+        });
+        this._monitorDebounceTimeoutIds.set(profileId, timeoutId);
+    }
+
     _loadProfiles() {
         // Load serialized profiles from GSettings. Be defensive: a corrupt
         // value should not crash the extension.
@@ -246,7 +283,9 @@ export default class PictureDesktopWidgetExtension extends Extension {
         if (!this.settings) return;
         // Clone to avoid mutating in-memory profiles with normalization artifacts
         const toSave = this._normalizeProfiles(profiles.map(p => ({ ...p })));
-        this.settings.set_string('widget-profiles', JSON.stringify(toSave));
+        const serializedProfiles = JSON.stringify(toSave);
+        if (this.settings.get_string('widget-profiles') !== serializedProfiles)
+            this.settings.set_string('widget-profiles', serializedProfiles);
         if (!this.settings.get_string('active-profile-id') && toSave[0]) {
             this.settings.set_string('active-profile-id', toSave[0].id);
         }
@@ -290,11 +329,13 @@ export default class PictureDesktopWidgetExtension extends Extension {
         }
 
         const timeoutId = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, delay, () => {
-            const current = this._profiles.find(p => p.id === id);
-            if (current) {
-                this._refreshProfile(current, false);
+            const current = this._profileById.get(id);
+            if (!current) {
+                this._timeoutIds.delete(id);
+                return GLib.SOURCE_REMOVE;
             }
-            this._scheduleProfileRefresh(current || profile);
+            this._refreshProfile(current, false);
+            this._scheduleProfileRefresh(current);
             return GLib.SOURCE_REMOVE;
         });
         this._timeoutIds.set(id, timeoutId);
@@ -509,6 +550,7 @@ export default class PictureDesktopWidgetExtension extends Extension {
             const incoming = this._normalizeProfiles(this._loadProfiles());
             const incomingIds = new Set(incoming.map(p => p.id));
             const existingIds = new Set(this._profiles.map(p => p.id));
+            const existingById = new Map(this._profiles.map(p => [p.id, p]));
 
             // Remove profiles that no longer exist
             for (const id of existingIds) {
@@ -528,7 +570,7 @@ export default class PictureDesktopWidgetExtension extends Extension {
             // Create or update profiles
             for (let i = 0; i < incoming.length; i++) {
                 const profile = incoming[i];
-                const existing = this._profiles.find(p => p.id === profile.id);
+                const existing = existingById.get(profile.id);
 
                 if (!existing) {
                     // Brand new profile
@@ -609,14 +651,17 @@ export default class PictureDesktopWidgetExtension extends Extension {
             }
 
             this._profiles = incoming;
+            this._rebuildProfileIndex();
 
             // Ensure active-profile-id is valid
-            const activeId = this.settings.get_string('active-profile-id') ||
+            const currentActiveId = this.settings.get_string('active-profile-id');
+            const activeId = currentActiveId ||
                              (incoming[0]?.id ?? '');
-            this.settings.set_string(
-                'active-profile-id',
-                incoming.some(p => p.id === activeId) ? activeId : (incoming[0]?.id ?? '')
-            );
+            const nextActiveId = incoming.some(p => p.id === activeId)
+                ? activeId
+                : (incoming[0]?.id ?? '');
+            if (currentActiveId !== nextActiveId)
+                this.settings.set_string('active-profile-id', nextActiveId);
         } finally {
             this._reloadingProfiles = false;
         }
