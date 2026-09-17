@@ -1,6 +1,7 @@
 import St from 'gi://St';
 import GLib from 'gi://GLib';
 import Gio from 'gi://Gio';
+import GdkPixbuf from 'gi://GdkPixbuf';
 import Clutter from 'gi://Clutter';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import { Extension, gettext as _ } from 'resource:///org/gnome/shell/extensions/extension.js';
@@ -31,6 +32,7 @@ export default class PictureDesktopWidgetExtension extends Extension {
         this._widgetByProfileId = new Map();
         this._timeoutIds = new Map();
         this._monitorDebounceTimeoutIds = new Map();
+        this._imageCacheDir = null;
         this._reloadingProfiles = false;
 
         if (this._profiles.length === 0) {
@@ -95,6 +97,7 @@ export default class PictureDesktopWidgetExtension extends Extension {
         }
         this._profiles = [];
         this._profileById = new Map();
+        this._imageCacheDir = null;
         this.settings = null;
     }
 
@@ -526,8 +529,9 @@ export default class PictureDesktopWidgetExtension extends Extension {
             widget._emptyStateBox = emptyStateBox;
             widget._label = label;
         } else {
+            const displayPath = this._getDisplayImagePath(profile.currentImagePath);
             const imageUri = Gio.File.new_for_path(
-                profile.currentImagePath
+                displayPath
             ).get_uri();
             widget.set_style(`
                 background-image: url("${imageUri}");
@@ -536,6 +540,134 @@ export default class PictureDesktopWidgetExtension extends Extension {
                 background-position: center;
                 border-radius: ${radiusPx}px;
             `);
+        }
+    }
+
+    _readJpegOrientation(path) {
+        const file = Gio.File.new_for_path(path);
+        const [, contents] = file.load_contents(null);
+        if (contents.length < 12 || contents[0] !== 0xff || contents[1] !== 0xd8)
+            return 1;
+
+        const readUint16 = (data, offset, littleEndian) => littleEndian
+            ? data[offset] | (data[offset + 1] << 8)
+            : (data[offset] << 8) | data[offset + 1];
+        const readUint32 = (data, offset, littleEndian) => littleEndian
+            ? (data[offset] |
+               (data[offset + 1] << 8) |
+               (data[offset + 2] << 16) |
+               (data[offset + 3] << 24)) >>> 0
+            : ((data[offset] << 24) |
+               (data[offset + 1] << 16) |
+               (data[offset + 2] << 8) |
+               data[offset + 3]) >>> 0;
+
+        let offset = 2;
+        while (offset + 4 <= contents.length) {
+            if (contents[offset] !== 0xff)
+                break;
+            const marker = contents[offset + 1];
+            if (marker === 0xda || marker === 0xd9)
+                break;
+            const segmentLength = (contents[offset + 2] << 8) |
+                                  contents[offset + 3];
+            if (segmentLength < 2 || offset + 2 + segmentLength > contents.length)
+                break;
+
+            if (marker === 0xe1 && segmentLength >= 8 &&
+                contents[offset + 4] === 0x45 &&
+                contents[offset + 5] === 0x78 &&
+                contents[offset + 6] === 0x69 &&
+                contents[offset + 7] === 0x66 &&
+                contents[offset + 8] === 0x00 &&
+                contents[offset + 9] === 0x00) {
+                const tiff = offset + 10;
+                const littleEndian = contents[tiff] === 0x49 && contents[tiff + 1] === 0x49;
+                if (!littleEndian &&
+                    !(contents[tiff] === 0x4d && contents[tiff + 1] === 0x4d))
+                    return 1;
+                const ifdOffset = readUint32(contents, tiff + 4, littleEndian);
+                const ifd = tiff + ifdOffset;
+                if (ifd + 2 > contents.length)
+                    return 1;
+                const entryCount = readUint16(contents, ifd, littleEndian);
+                for (let index = 0; index < entryCount; index++) {
+                    const entry = ifd + 2 + index * 12;
+                    if (entry + 12 > contents.length)
+                        return 1;
+                    if (readUint16(contents, entry, littleEndian) === 0x0112 &&
+                        readUint16(contents, entry + 2, littleEndian) === 3)
+                        return readUint16(contents, entry + 8, littleEndian);
+                }
+                return 1;
+            }
+            offset += 2 + segmentLength;
+        }
+        return 1;
+    }
+
+    _transformImageOrientation(pixbuf, orientation) {
+        switch (orientation) {
+        case 2:
+            return pixbuf.flip(true);
+        case 3:
+            return pixbuf.rotate_simple(GdkPixbuf.PixbufRotation.UPSIDEDOWN);
+        case 4:
+            return pixbuf.flip(false);
+        case 5:
+            return pixbuf.flip(true).rotate_simple(GdkPixbuf.PixbufRotation.COUNTERCLOCKWISE);
+        case 6:
+            return pixbuf.rotate_simple(GdkPixbuf.PixbufRotation.CLOCKWISE);
+        case 7:
+            return pixbuf.flip(true).rotate_simple(GdkPixbuf.PixbufRotation.CLOCKWISE);
+        case 8:
+            return pixbuf.rotate_simple(GdkPixbuf.PixbufRotation.COUNTERCLOCKWISE);
+        default:
+            return pixbuf;
+        }
+    }
+
+    _getDisplayImagePath(path) {
+        if (!/\.jpe?g$/i.test(path))
+            return path;
+
+        try {
+            const sourceFile = Gio.File.new_for_path(path);
+            const info = sourceFile.query_info(
+                'standard::size,time::modified',
+                Gio.FileQueryInfoFlags.NONE,
+                null
+            );
+            const orientation = this._readJpegOrientation(path);
+            if (orientation === 1)
+                return path;
+
+            if (!this._imageCacheDir) {
+                const cachePath = GLib.build_filenamev([
+                    GLib.get_user_cache_dir(),
+                    'picture-desktop-widget-remake',
+                ]);
+                this._imageCacheDir = Gio.File.new_for_path(cachePath);
+                if (!this._imageCacheDir.query_exists(null))
+                    this._imageCacheDir.make_directory_with_parents(null);
+            }
+
+            const signature = `${path}:${info.get_size()}:${info.get_attribute_uint64('time::modified')}:${orientation}`;
+            const cacheName = `${GLib.compute_checksum_for_string(
+                GLib.ChecksumType.SHA256,
+                signature,
+                -1
+            )}.jpg`;
+            const cacheFile = this._imageCacheDir.get_child(cacheName);
+            if (!cacheFile.query_exists(null)) {
+                const pixbuf = GdkPixbuf.Pixbuf.new_from_file(path);
+                const corrected = this._transformImageOrientation(pixbuf, orientation);
+                corrected.savev(cacheFile.get_path(), 'jpeg', ['quality'], ['95']);
+            }
+            return cacheFile.get_path();
+        } catch (error) {
+            console.warn(`Unable to normalize image orientation for ${path}: ${error}`);
+            return path;
         }
     }
 
