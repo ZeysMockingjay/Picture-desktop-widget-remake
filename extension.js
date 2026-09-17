@@ -157,6 +157,7 @@ export default class PictureDesktopWidgetExtension extends Extension {
             widgetPositionY: 100,
             widgetAspectRatio: 1.0,
             widgetTimeout: 60,
+            fadeDuration: 700,
             widgetCornerRadius: 20,
             timeLastUpdate: 0,
             currentImagePath: '',
@@ -203,6 +204,11 @@ export default class PictureDesktopWidgetExtension extends Extension {
                 : (Number.isFinite(Number(fallback.widgetTimeout))
                     ? Number(fallback.widgetTimeout)
                     : 60),
+            fadeDuration: Number.isFinite(Number(profile.fadeDuration))
+                ? Number(profile.fadeDuration)
+                : (Number.isFinite(Number(fallback.fadeDuration))
+                    ? Number(fallback.fadeDuration)
+                    : 700),
             widgetCornerRadius: Number.isFinite(Number(profile.widgetCornerRadius))
                 ? Number(profile.widgetCornerRadius)
                 : (Number.isFinite(Number(fallback.widgetCornerRadius))
@@ -229,6 +235,8 @@ export default class PictureDesktopWidgetExtension extends Extension {
 
         if (normalized.widgetSize < 20) normalized.widgetSize = 20;
         if (normalized.widgetTimeout < 5) normalized.widgetTimeout = 5;
+        if (normalized.fadeDuration < 0) normalized.fadeDuration = 0;
+        if (normalized.fadeDuration > 3000) normalized.fadeDuration = 3000;
         if (normalized.widgetCornerRadius < 0) normalized.widgetCornerRadius = 0;
         return normalized;
     }
@@ -301,6 +309,15 @@ export default class PictureDesktopWidgetExtension extends Extension {
         }
         const widget = new St.Widget();
         widget._profileId = profile.id;
+        widget._imageLayers = [new St.Widget(), new St.Widget()];
+        widget._activeImageLayer = -1;
+        widget._displayedImagePath = '';
+        widget._imageTransitionId = 0;
+        for (const layer of widget._imageLayers) {
+            layer.opacity = 0;
+            layer.visible = false;
+            widget.add_child(layer);
+        }
         widget.visible = profile.visible !== false;
         Main.layoutManager._backgroundGroup.add_child(widget);
         this._widgetByProfileId.set(profile.id, widget);
@@ -363,6 +380,10 @@ export default class PictureDesktopWidgetExtension extends Extension {
         widget.set_width(width);
         widget.set_height(height);
         widget.set_position(x, y);
+        for (const layer of widget._imageLayers || []) {
+            layer.set_size(width, height);
+            layer.set_position(0, 0);
+        }
     }
 
     _selectRandomImage(profile, force = false) {
@@ -491,6 +512,13 @@ export default class PictureDesktopWidgetExtension extends Extension {
         if (profile.visible === false) return;
 
         if (profile.currentImagePath === '') {
+            for (const layer of widget._imageLayers || []) {
+                layer.remove_all_transitions();
+                layer.visible = false;
+                layer.opacity = 0;
+            }
+            widget._activeImageLayer = -1;
+            widget._displayedImagePath = '';
             widget.set_style(`
                 background-image: none;
                 background-color: rgba(0, 0, 0, 1);
@@ -533,13 +561,73 @@ export default class PictureDesktopWidgetExtension extends Extension {
             const imageUri = Gio.File.new_for_path(
                 displayPath
             ).get_uri();
-            widget.set_style(`
+            const layers = widget._imageLayers;
+            if (!layers)
+                return;
+
+            const imageChanged = widget._displayedImagePath !== displayPath;
+            const firstImage = widget._activeImageLayer < 0;
+            if (!imageChanged && !firstImage) {
+                layers[widget._activeImageLayer].set_style(`
+                    background-image: url("${imageUri}");
+                    background-size: cover;
+                    background-repeat: no-repeat;
+                    background-position: center;
+                    border-radius: ${radiusPx}px;
+                `);
+                return;
+            }
+
+            const nextLayerIndex = firstImage ? 0 : 1 - widget._activeImageLayer;
+            const nextLayer = layers[nextLayerIndex];
+            const oldLayer = firstImage ? null : layers[widget._activeImageLayer];
+            const transitionId = ++widget._imageTransitionId;
+            const fadeDuration = Math.min(
+                Math.max(0, profile.fadeDuration ?? 700),
+                Math.max(0, (profile.widgetTimeout || 60) * 500)
+            );
+            const reducedMotion = St.Settings.get().reducedMotion ===
+                St.ReducedMotion.REDUCE;
+            const animate = !firstImage && fadeDuration > 0 && !reducedMotion;
+
+            for (const layer of layers)
+                layer.remove_all_transitions();
+
+            nextLayer.set_style(`
                 background-image: url("${imageUri}");
                 background-size: cover;
                 background-repeat: no-repeat;
                 background-position: center;
                 border-radius: ${radiusPx}px;
             `);
+            nextLayer.visible = true;
+            nextLayer.opacity = animate ? 0 : 255;
+
+            if (oldLayer) {
+                oldLayer.opacity = animate ? 255 : 0;
+                oldLayer.visible = animate;
+            }
+
+            widget._activeImageLayer = nextLayerIndex;
+            widget._displayedImagePath = displayPath;
+
+            if (animate) {
+                nextLayer.ease({
+                    opacity: 255,
+                    duration: fadeDuration,
+                    mode: Clutter.AnimationMode.EASE_IN_OUT_QUAD,
+                });
+                oldLayer.ease({
+                    opacity: 0,
+                    duration: fadeDuration,
+                    mode: Clutter.AnimationMode.EASE_IN_OUT_QUAD,
+                    onComplete: () => {
+                        if (widget._imageTransitionId !== transitionId)
+                            return;
+                        oldLayer.visible = false;
+                    },
+                });
+            }
         }
     }
 

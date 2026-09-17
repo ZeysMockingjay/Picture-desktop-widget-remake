@@ -341,6 +341,16 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
         this._timeoutRow.set_subtitle(_('How often a new random image is selected'));
         imageGroup.add(this._timeoutRow);
 
+        this._fadeDurationRow = this._createSpinRow(
+            _('Fade Duration (ms)'), 0, 3000, 50, 500,
+            () => this._getActiveProfile()?.fadeDuration ?? 700,
+            value => this._setActiveProfileValue('fadeDuration', value)
+        );
+        this._fadeDurationRow.set_subtitle(
+            _('Set to 0 to change images instantly')
+        );
+        imageGroup.add(this._fadeDurationRow);
+
         this._currentInfoRow = new Adw.ActionRow({
             title: _('Current Image'),
             subtitle: this._getActiveProfile()?.currentImagePath || _('(none selected yet)'),
@@ -417,6 +427,9 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
             widgetTimeout: Number.isFinite(Number(profile.widgetTimeout))
                 ? Number(profile.widgetTimeout)
                 : (Number(fallback.widgetTimeout) || 60),
+            fadeDuration: Number.isFinite(Number(profile.fadeDuration))
+                ? Number(profile.fadeDuration)
+                : (Number(fallback.fadeDuration) || 700),
             widgetCornerRadius: Number.isFinite(Number(profile.widgetCornerRadius))
                 ? Number(profile.widgetCornerRadius)
                 : (Number(fallback.widgetCornerRadius) || 20),
@@ -463,6 +476,7 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
             profile.widgetPositionY !== 100 ||
             profile.widgetAspectRatio !== 1.0 ||
             profile.widgetTimeout !== 60 ||
+            profile.fadeDuration !== 700 ||
             profile.widgetCornerRadius !== 20 ||
             profile.visible === false;
         return legacyNames.has(profile.name) && !hasMeaningfulData;
@@ -500,6 +514,7 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
             widgetPositionY: 100 + offset,
             widgetAspectRatio: 1.0,
             widgetTimeout: 60,
+            fadeDuration: 700,
             widgetCornerRadius: 20,
             timeLastUpdate: 0,
             currentImagePath: '',
@@ -560,6 +575,8 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
             this._yPositionRow.set_value(profile.widgetPositionY || 0);
         if (this._timeoutRow)
             this._timeoutRow.set_value(profile.widgetTimeout || 60);
+        if (this._fadeDurationRow)
+            this._fadeDurationRow.set_value(profile.fadeDuration ?? 700);
         if (this._cornerRadiusRow)
             this._cornerRadiusRow.set_value(profile.widgetCornerRadius || 20);
         if (this._aspectRatioRow)
