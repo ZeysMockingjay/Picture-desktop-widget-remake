@@ -607,30 +607,26 @@ export default class PictureDesktopWidgetExtension extends Extension {
                 (profile.imagePath
                     ? _('No images found in this folder')
                     : _('Add a path\n to folder with images'));
-            const emptyStateBox = new St.BoxLayout({
-                vertical: true,
+            const emptyStateBox = new St.Widget({
                 x_expand: true,
                 y_expand: true,
                 x_align: Clutter.ActorAlign.FILL,
                 y_align: Clutter.ActorAlign.FILL,
+                layout_manager: new Clutter.BinLayout(),
             });
-            const topSpacer = new St.Widget({ x_expand: true, y_expand: true });
             const label = new St.Label({
                 text: msg,
                 x_align: Clutter.ActorAlign.CENTER,
                 y_align: Clutter.ActorAlign.CENTER,
                 x_expand: true,
-                y_expand: false,
+                y_expand: true,
             });
             label.set_style(`
                 color: white;
                 font-size: ${Math.max(10, Math.min(width, height) / 18)}px;
                 text-align: center;
             `);
-            const bottomSpacer = new St.Widget({ x_expand: true, y_expand: true });
-            emptyStateBox.add_child(topSpacer);
             emptyStateBox.add_child(label);
-            emptyStateBox.add_child(bottomSpacer);
             widget.add_child(emptyStateBox);
             widget._emptyStateBox = emptyStateBox;
             widget._label = label;

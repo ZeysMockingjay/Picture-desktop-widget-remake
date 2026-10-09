@@ -45,7 +45,6 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
     fillPreferencesWindow(window) {
         this.settings = this.getSettings();
         this._developerErrors = [];
-        window.set_title(_('Picture Desktop Widget Remake'));
         window.set_default_size(780, 700);
         this._profiles = this._normalizeProfiles(this._loadProfiles());
         this._activeProfileId = this.settings.get_string('active-profile-id') ||
@@ -66,11 +65,12 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
         const page = new Adw.PreferencesPage();
         page.set_title(_('Image Frames'));
         page.set_name(_('Image Frames'));
-        const aboutButton = this._createActionButton(
-            _('About'),
-            'help-about-symbolic',
-            'image-frame-action-button about-action-button'
-        );
+        const aboutButton = new Gtk.Button({
+            icon_name: 'help-about-symbolic',
+            valign: Gtk.Align.CENTER,
+            tooltip_text: _('About'),
+        });
+        aboutButton.add_css_class('about-action-button');
         aboutButton.set_tooltip_text(_('About'));
         aboutButton.connect('clicked', () => this._showAboutDialog(window));
 
@@ -109,6 +109,7 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
         headerText.append(headerSubtitle);
 
         headerBox.append(headerText);
+        headerBox.append(aboutButton);
         shellBox.append(headerBox);
 
         this._frameStack = new Gtk.Stack({
@@ -125,9 +126,8 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
             margin_top: SPACING_SM,
         });
         aboutActions.append(aboutButton);
-        const aboutGroup = new Adw.PreferencesGroup();
-        aboutGroup.add(aboutActions);
-        page.add(aboutGroup);
+        shellBox.append(aboutActions);
+
         window.add(page);
 
         const dashboardBox = new Gtk.Box({
@@ -1074,8 +1074,10 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
             }
 
             .about-action-button {
-                min-height: 28px;
-                padding: 2px 18px;
+                min-width: 32px;
+                min-height: 32px;
+                padding: 0;
+                border-radius: 50%;
             }
 
             .image-frame-action-button > box {
