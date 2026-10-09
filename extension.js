@@ -32,6 +32,7 @@ export default class PictureDesktopWidgetExtension extends Extension {
         this._widgetByProfileId = new Map();
         this._timeoutIds = new Map();
         this._monitorDebounceTimeoutIds = new Map();
+        this._scanJobs = new Map();
         this._imageCacheDir = null;
         this._reloadingProfiles = false;
 
@@ -59,8 +60,6 @@ export default class PictureDesktopWidgetExtension extends Extension {
         this.settings.connectObject(
             'changed::widget-profiles',
             this._reloadProfiles,
-            'changed::active-profile-id',
-            this._reloadProfiles,
             this
         );
     }
@@ -78,6 +77,13 @@ export default class PictureDesktopWidgetExtension extends Extension {
             this._clearMonitorRefreshDebounce(profileId);
         }
         this._monitorDebounceTimeoutIds.clear();
+        for (const job of this._scanJobs.values()) {
+            if (job.id)
+                GLib.Source.remove(job.id);
+            if (job.enumerator)
+                job.enumerator.close(null);
+        }
+        this._scanJobs.clear();
 
         if (this.settings)
             this.settings.disconnectObject(this);
@@ -109,14 +115,17 @@ export default class PictureDesktopWidgetExtension extends Extension {
         // in the monitor callback.
         if (!profile || !profile.imagePath)
             return;
-        if (!Gio.File.new_for_path(profile.imagePath).query_exists(null))
+        const configuredFolder = Gio.File.new_for_path(profile.imagePath);
+        const monitorFolder = configuredFolder.query_exists(null)
+            ? configuredFolder
+            : configuredFolder.get_parent();
+        if (!monitorFolder || !monitorFolder.query_exists(null))
             return;
         try {
             // Remove existing monitor for this profile if present
             this._removeDirMonitor(profile.id);
 
-            const file = Gio.File.new_for_path(profile.imagePath);
-            const monitor = file.monitor_directory(Gio.FileMonitorFlags.NONE, null);
+            const monitor = monitorFolder.monitor_directory(Gio.FileMonitorFlags.NONE, null);
             monitor.set_rate_limit(MONITOR_RATE_LIMIT_MS);
             monitor.connectObject('changed', () => {
                 this._queueMonitorRefresh(profile.id);
@@ -269,6 +278,7 @@ export default class PictureDesktopWidgetExtension extends Extension {
                 return GLib.SOURCE_REMOVE;
             profile.requiresRescan = true;
             this._refreshProfile(profile, false);
+            this._installDirMonitor(profile);
             this._scheduleProfileRefresh(profile);
             return GLib.SOURCE_REMOVE;
         });
@@ -292,8 +302,17 @@ export default class PictureDesktopWidgetExtension extends Extension {
 
     _saveProfiles(profiles = this._profiles) {
         if (!this.settings) return;
-        // Clone to avoid mutating in-memory profiles with normalization artifacts
-        const toSave = this._normalizeProfiles(profiles.map(p => ({ ...p })));
+        const toSave = this._normalizeProfiles(profiles.map(profile => {
+            const {
+                currentImagePath,
+                cachedFiles,
+                cachedFolderPath,
+                requiresRescan,
+                timeLastUpdate,
+                ...persistentProfile
+            } = profile;
+            return persistentProfile;
+        }));
         const serializedProfiles = JSON.stringify(toSave);
         if (this.settings.get_string('widget-profiles') !== serializedProfiles)
             this.settings.set_string('widget-profiles', serializedProfiles);
@@ -414,14 +433,13 @@ export default class PictureDesktopWidgetExtension extends Extension {
         let fileNames = profile.cachedFiles || [];
         const shouldRescan = force ||
             profile.requiresRescan ||
-            profile.cachedFolderPath !== folderPath ||
-            fileNames.length === 0;
+            profile.cachedFolderPath !== folderPath;
         if (shouldRescan) {
-            // Rescan (synchronous, but capped by MAX_SCAN_* constants)
-            fileNames = this._scanImageFiles(folderPath);
-            profile.cachedFiles = fileNames;
-            profile.cachedFolderPath = folderPath;
-            profile.requiresRescan = false;
+            this._startImageScan(profile, folderPath);
+            profile.currentImagePath = '';
+            profile._statusMessage = _('Scanning folder...');
+            this._updateWidgetAppearance(widget, profile);
+            return;
         }
 
         if (fileNames.length === 0) {
@@ -440,51 +458,111 @@ export default class PictureDesktopWidgetExtension extends Extension {
         this._updateWidgetAppearance(widget, profile);
     }
 
-    _scanImageFiles(folderPath) {
-        const folder = Gio.File.new_for_path(folderPath);
-        const fileNames = [];
+    _startImageScan(profile, folderPath) {
+        const previousJob = this._scanJobs.get(profile.id);
+        if (previousJob?.folderPath === folderPath)
+            return;
+        if (previousJob) {
+            if (previousJob.id)
+                GLib.Source.remove(previousJob.id);
+            if (previousJob.enumerator)
+                previousJob.enumerator.close(null);
+            this._scanJobs.delete(profile.id);
+        }
 
-        // Depth-first directory scan with limits to avoid long blocking ops.
-        // Returns relative paths (from folderPath) of matching image files.
-        const scanDirectory = (directory, relativeBase = '', depth = 0) => {
-            if (depth >= MAX_SCAN_DEPTH) return;
+        const job = {
+            folderPath,
+            fileNames: [],
+            directories: [{
+                file: Gio.File.new_for_path(folderPath),
+                relativeBase: '',
+                depth: 0,
+            }],
+            enumerator: null,
+            id: 0,
+        };
+        this._scanJobs.set(profile.id, job);
+
+        const processBatch = () => {
+            if (this._scanJobs.get(profile.id) !== job) {
+                if (job.enumerator)
+                    job.enumerator.close(null);
+                return GLib.SOURCE_REMOVE;
+            }
+
+            let processed = 0;
             try {
-                const enumerator = directory.enumerate_children(
-                    'standard::name,standard::type',
-                    Gio.FileQueryInfoFlags.NONE,
-                    null
-                );
-                let info;
-                while ((info = enumerator.next_file(null)) !== null) {
-                    if (fileNames.length >= MAX_SCAN_FILES) break;
-                    const childName = info.get_name();
-                    // Skip dot-directories like .cache or .git
-                    if (SKIP_DOT_DIRS && childName.startsWith('.')) {
+                while (processed < 100 && job.fileNames.length < MAX_SCAN_FILES) {
+                    if (!job.enumerator) {
+                        const nextDirectory = job.directories.shift();
+                        if (!nextDirectory) {
+                            const current = this._profileById.get(profile.id);
+                            this._scanJobs.delete(profile.id);
+                            if (current && current.imagePath === folderPath) {
+                                current.cachedFiles = job.fileNames.sort();
+                                current.cachedFolderPath = folderPath;
+                                current.requiresRescan = false;
+                                this._selectRandomImage(current, false);
+                            }
+                            return GLib.SOURCE_REMOVE;
+                        }
+                        if (nextDirectory.depth >= MAX_SCAN_DEPTH)
+                            continue;
+                        job.enumerator = nextDirectory.file.enumerate_children(
+                            'standard::name,standard::type',
+                            Gio.FileQueryInfoFlags.NONE,
+                            null
+                        );
+                        job.relativeBase = nextDirectory.relativeBase;
+                        job.directoryDepth = nextDirectory.depth;
+                        job.directoryFile = nextDirectory.file;
+                    }
+
+                    const info = job.enumerator.next_file(null);
+                    processed++;
+                    if (!info) {
+                        job.enumerator.close(null);
+                        job.enumerator = null;
                         continue;
                     }
-                    const childPath = directory.get_child(childName);
-                    const relative = relativeBase
-                        ? `${relativeBase}/${childName}`
-                        : childName;
 
+                    const childName = info.get_name();
+                    if (SKIP_DOT_DIRS && childName.startsWith('.'))
+                        continue;
+                    const relative = job.relativeBase
+                        ? `${job.relativeBase}/${childName}`
+                        : childName;
+                    const childFile = job.directoryFile.get_child(childName);
                     if (info.get_file_type() === Gio.FileType.DIRECTORY) {
-                        scanDirectory(childPath, relative, depth + 1);
+                        job.directories.push({
+                            file: childFile,
+                            relativeBase: relative,
+                            depth: job.directoryDepth + 1,
+                        });
                     } else if (SUPPORTED_IMAGE_EXTENSIONS.some(
                         ext => childName.toLowerCase().endsWith(ext)
                     )) {
-                        fileNames.push(relative);
+                        job.fileNames.push(relative);
                     }
                 }
-                enumerator.close(null);
             } catch (error) {
-                console.warn(
-                    `Error scanning directory ${directory.get_path()}: ${error}`
-                );
+                if (job.enumerator)
+                    job.enumerator.close(null);
+                job.enumerator = null;
+                job.directories = [];
+                console.warn(`Error scanning directory ${folderPath}: ${error}`);
             }
+            if (job.fileNames.length >= MAX_SCAN_FILES) {
+                if (job.enumerator)
+                    job.enumerator.close(null);
+                job.enumerator = null;
+                job.directories = [];
+            }
+            job.id = GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, processBatch);
+            return GLib.SOURCE_REMOVE;
         };
 
-        scanDirectory(folder);
-        return fileNames.sort();
+        job.id = GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, processBatch);
     }
 
     _updateWidgetAppearance(widget, profile) {
@@ -775,6 +853,14 @@ export default class PictureDesktopWidgetExtension extends Extension {
             // Remove profiles that no longer exist
             for (const id of existingIds) {
                 if (!incomingIds.has(id)) {
+                    const scanJob = this._scanJobs.get(id);
+                    if (scanJob) {
+                        if (scanJob.id)
+                            GLib.Source.remove(scanJob.id);
+                        if (scanJob.enumerator)
+                            scanJob.enumerator.close(null);
+                        this._scanJobs.delete(id);
+                    }
                     const widget = this._widgetByProfileId.get(id);
                     if (widget) widget.destroy();
                     this._widgetByProfileId.delete(id);
@@ -829,7 +915,15 @@ export default class PictureDesktopWidgetExtension extends Extension {
                 // Merge incoming values into the existing (preserving in-memory ref)
                 // so that mutations from _refreshProfile/_selectRandomImage are kept
                 Object.assign(existing, profile);
-                Object.assign(existing, runtimeState);
+                if (imagePathChanged) {
+                    // A folder change invalidates the old folder's runtime state.
+                    existing.currentImagePath = '';
+                    existing.cachedFiles = [];
+                    existing.cachedFolderPath = '';
+                    existing.timeLastUpdate = 0;
+                } else {
+                    Object.assign(existing, runtimeState);
+                }
 
                 // Install directory monitor for the new path if it changed
                 if (imagePathChanged) {

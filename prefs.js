@@ -14,7 +14,6 @@ const FRAME_TILE_SPACING = 12;
 const SPACING_XS = 6;
 const SPACING_SM = 12;
 const SPACING_MD = 18;
-const SUPPORTED_IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg'];
 
 export default class PictureDesktopWidgetPreferences extends ExtensionPreferences {
     _createActionButton(label, iconName, cssClass = '') {
@@ -276,7 +275,7 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
                 this.settings.set_string('active-profile-id', this._activeProfileId);
                 this._saveProfiles();
                 this._refreshFrameDashboard();
-                this._showSettingsPage();
+                this._showDashboard();
                 dlg.destroy();
             });
             dialog.present();
@@ -495,9 +494,17 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
     }
 
     _saveProfiles() {
-        const toSave = this._normalizeProfiles(
-            this._profiles.map(p => ({ ...p }))
-        );
+        const toSave = this._normalizeProfiles(this._profiles.map(profile => {
+            const {
+                currentImagePath,
+                cachedFiles,
+                cachedFolderPath,
+                requiresRescan,
+                timeLastUpdate,
+                ...persistentProfile
+            } = profile;
+            return persistentProfile;
+        }));
         const serializedProfiles = JSON.stringify(toSave);
         if (this.settings.get_string('widget-profiles') !== serializedProfiles)
             this.settings.set_string('widget-profiles', serializedProfiles);
@@ -543,6 +550,13 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
     _setActiveProfileValue(key, value) {
         const profile = this._getActiveProfile();
         if (!profile) return;
+        if (key === 'imagePath' && profile.imagePath !== value) {
+            profile.currentImagePath = '';
+            profile.cachedFiles = [];
+            profile.cachedFolderPath = '';
+            profile.timeLastUpdate = 0;
+            profile.requiresRescan = true;
+        }
         profile[key] = value;
         this._queueSaveProfiles();
         if (key === 'name') {
@@ -1208,35 +1222,6 @@ export default class PictureDesktopWidgetPreferences extends ExtensionPreference
                     const folderPath = dlg.get_file().get_path();
                     setter(folderPath);
                     row.set_subtitle(folderPath);
-
-                    // Count images in the chosen folder (informational)
-                    try {
-                        const folder = Gio.File.new_for_path(folderPath);
-                        if (folder.query_exists(null)) {
-                            const enumerator = folder.enumerate_children(
-                                'standard::name',
-                                Gio.FileQueryInfoFlags.NONE,
-                                null
-                            );
-                            let count = 0;
-                            let info;
-                            while ((info = enumerator.next_file(null)) !== null) {
-                                const name = info.get_name().toLowerCase();
-                                if (SUPPORTED_IMAGE_EXTENSIONS.some(ext => name.endsWith(ext))) {
-                                    count++;
-                                }
-                            }
-                            enumerator.close(null);
-                            if (count > 0) {
-                                row.set_subtitle(
-                                    _('%d images found').format(count)
-                                );
-                            }
-                        }
-                    } catch (error) {
-                        const message = `Unable to count images in selected folder: ${error}`;
-                        this._recordDeveloperError(message);
-                    }
                 }
                 dlg.destroy();
             });
