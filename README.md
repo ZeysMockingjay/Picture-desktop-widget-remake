@@ -1,6 +1,6 @@
 # Picture Desktop Widget Remake
 
-Version V32
+Version V33
 
 A simple GNOME Shell extension that displays random images from a chosen folder directly on the desktop as customizable widgets.
 
@@ -20,6 +20,8 @@ This project is a remake of the original Picture Desktop Widget idea, expanded w
 
 Maintained by:
 - Maximilian Rosenbaum
+
+Special Thanks to:
 - Elias-Leander Ahlers
 
 Based on the original Picture Desktop Widget by GaszokS.
